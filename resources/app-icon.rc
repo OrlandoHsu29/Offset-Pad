@@ -1,0 +1,8 @@
+#define IDI_APP_ICON_LIGHT 101
+#define IDI_APP_ICON_DARK 102
+#define IDI_TRAY_ICON_O 103
+#define IDI_TRAY_ICON_9 104
+IDI_APP_ICON_LIGHT ICON "media/OffsetPad-light.ico"
+IDI_APP_ICON_DARK ICON "media/OffsetPad-dark.ico"
+IDI_TRAY_ICON_O ICON "media/OffsetPad-icon-o.ico"
+IDI_TRAY_ICON_9 ICON "media/OffsetPad-icon-9.ico"
