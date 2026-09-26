@@ -53,13 +53,15 @@ static void clear_hotkey_block_if_released(void)
         block_hotkey_until_clear = 0;
 }
 
-static void send_digit(WORD digit, int released)
+static void send_digit(WORD digit)
 {
-    INPUT input = {0};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wScan = digit;
-    input.ki.dwFlags = KEYEVENTF_UNICODE | (released ? KEYEVENTF_KEYUP : 0);
-    SendInput(1, &input, sizeof(input));
+    INPUT input[2] = {0};
+    input[0].type = INPUT_KEYBOARD;
+    input[0].ki.wScan = digit;
+    input[0].ki.dwFlags = KEYEVENTF_UNICODE;
+    input[1] = input[0];
+    input[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    SendInput(2, input, sizeof(input[0]));
 }
 
 void keymap_set_enabled(int value)
@@ -71,7 +73,6 @@ void keymap_set_enabled(int value)
     if (!value) {
         for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
             if (keys[index].down) {
-                send_digit(keys[index].target, 1);
                 keys[index].down = 0;
                 keys[index].swallow_up = 1;
                 keys[index].swallow_source = keys[index].source;
@@ -174,7 +175,6 @@ int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
     }
     for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
         if (keys[index].down) {
-            send_digit(keys[index].target, 1);
             keys[index].down = 0;
             keys[index].swallow_up = 1;
             keys[index].swallow_source = keys[index].source;
@@ -311,7 +311,6 @@ static void release_mapped_keys(void)
     size_t index;
     for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
         if (keys[index].down) {
-            send_digit(keys[index].target, 1);
             keys[index].down = 0;
             keys[index].swallow_up = 1;
             keys[index].swallow_source = keys[index].source;
@@ -539,12 +538,11 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         if (released) {
             if (key->down) {
                 key->down = 0;
-                send_digit(key->target, 1);
                 return 1;
             }
         } else if (enabled) {
             key->down = 1;
-            send_digit(key->target, 0);
+            send_digit(key->target);
             return 1;
         }
         break;

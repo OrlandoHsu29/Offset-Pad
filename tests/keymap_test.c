@@ -11,11 +11,14 @@ static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size);
 
 static INPUT sent_inputs[8];
 static size_t sent_count;
+static size_t send_calls;
 
 static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
 {
     UINT index;
     assert(size == sizeof(INPUT));
+    assert(count == 2);
+    ++send_calls;
     assert(sent_count + count <= sizeof(sent_inputs) / sizeof(sent_inputs[0]));
     for (index = 0; index < count; ++index)
         sent_inputs[sent_count++] = input[index];
@@ -155,20 +158,40 @@ int main(void)
 
     keymap_set_enabled(1);
     sent_count = 0;
+    send_calls = 0;
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(sent_count == 3);
+    assert(sent_count == 4 && send_calls == 2);
     assert(sent_inputs[0].ki.wVk == 0 && sent_inputs[0].ki.wScan == L'1' &&
            sent_inputs[0].ki.dwFlags == KEYEVENTF_UNICODE);
     assert(sent_inputs[1].ki.wVk == 0 && sent_inputs[1].ki.wScan == L'1' &&
-           sent_inputs[1].ki.dwFlags == KEYEVENTF_UNICODE);
-    assert(sent_inputs[2].ki.wVk == 0 && sent_inputs[2].ki.wScan == L'1' &&
-           sent_inputs[2].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+           sent_inputs[1].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    assert(sent_inputs[2].ki.wScan == L'1' &&
+           sent_inputs[2].ki.dwFlags == KEYEVENTF_UNICODE);
+    assert(sent_inputs[3].ki.wScan == L'1' &&
+           sent_inputs[3].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+
+    sent_count = 0;
+    send_calls = 0;
+    key_event('N', WM_KEYDOWN);
+    key_event('O', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    key_event('O', WM_KEYUP);
+    assert(sent_count == 4 && send_calls == 2);
+    assert(sent_inputs[0].ki.wScan == L'1' &&
+           sent_inputs[0].ki.dwFlags == KEYEVENTF_UNICODE);
+    assert(sent_inputs[1].ki.wScan == L'1' &&
+           sent_inputs[1].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    assert(sent_inputs[2].ki.wScan == L'9' &&
+           sent_inputs[2].ki.dwFlags == KEYEVENTF_UNICODE);
+    assert(sent_inputs[3].ki.wScan == L'9' &&
+           sent_inputs[3].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+
     keymap_set_enabled(0);
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(sent_count == 3);
+    assert(sent_count == 4);
 
     puts("keymap tests passed");
     return 0;
