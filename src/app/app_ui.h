@@ -27,6 +27,8 @@ int ui_handle_dialog_message(MSG *message);
 #define WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE (WM_APP + 4)
 #define WM_OFFSET_PAD_SOURCE_CAPTURE_DONE (WM_APP + 5)
 #define WM_OFFSET_PAD_MODE_REMINDER (WM_APP + 6)
+#define WM_OFFSET_PAD_HOLD_CAPTURE_DONE (WM_APP + 7)
+#define WM_OFFSET_PAD_EFFECTIVE_CHANGED (WM_APP + 8)
 #define OFFSET_PAD_MAIN_CLASS L"OffsetPadMessageWindow"
 
 #endif

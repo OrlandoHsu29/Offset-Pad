@@ -18,7 +18,7 @@ static int restart_background;
 static void set_enabled(int enabled)
 {
     keymap_set_enabled(enabled);
-    if (!settings_save_enabled(keymap_is_enabled()))
+    if (!settings_save_enabled(keymap_is_latched()))
         MessageBoxW(main_window, L"无法保存键盘模式；本次运行仍会按当前模式工作。",
                     L"Offset Pad", MB_OK | MB_ICONERROR);
     ui_refresh();
@@ -70,8 +70,21 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_show();
         return 0;
     case WM_OFFSET_PAD_MODE_CHANGED:
-        if (!settings_save_enabled(keymap_is_enabled()))
+        if (!settings_save_enabled(keymap_is_latched()))
             MessageBoxW(window, L"无法保存键盘模式；本次运行仍会按当前模式工作。",
+                        L"Offset Pad", MB_OK | MB_ICONERROR);
+        ui_refresh();
+        return 0;
+    case WM_OFFSET_PAD_EFFECTIVE_CHANGED:
+        ui_refresh();
+        return 0;
+    case WM_OFFSET_PAD_HOLD_CAPTURE_DONE:
+        if (wparam == KEYMAP_CAPTURE_INVALID)
+            MessageBoxW(window, L"快捷键已占用或与数字映射冲突，请换一个组合。",
+                        L"Offset Pad", MB_OK | MB_ICONINFORMATION);
+        else if (wparam == KEYMAP_CAPTURE_SAVED &&
+                 !settings_save_hold_hotkey(keymap_get_hold_hotkey()))
+            MessageBoxW(window, L"无法保存按住快捷键；本次运行仍会使用新快捷键。",
                         L"Offset Pad", MB_OK | MB_ICONERROR);
         ui_refresh();
         return 0;
@@ -80,7 +93,7 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         return 0;
     case WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE:
         if (wparam == KEYMAP_CAPTURE_INVALID)
-            MessageBoxW(window, L"该按键已用于数字映射，请选择其他快捷键。",
+            MessageBoxW(window, L"快捷键已占用或与数字映射冲突，请换一个组合。",
                         L"Offset Pad", MB_OK | MB_ICONINFORMATION);
         else if (wparam == KEYMAP_CAPTURE_SAVED &&
                  !settings_save_hotkey(keymap_get_hotkey()))
@@ -90,7 +103,7 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         return 0;
     case WM_OFFSET_PAD_SOURCE_CAPTURE_DONE:
         if (wparam == KEYMAP_CAPTURE_INVALID) {
-            MessageBoxW(window, L"请按单个字母、数字、常用符号或空格，且不要占用单键切换快捷键；Esc 可取消。",
+            MessageBoxW(window, L"请按单个字母、数字、常用符号或空格，且不要占用单键快捷键；Esc 可取消。",
                         L"Offset Pad", MB_OK | MB_ICONINFORMATION);
         } else if (wparam == KEYMAP_CAPTURE_SAVED) {
             DWORD sources[KEYMAP_KEY_COUNT];
@@ -192,7 +205,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     keymap_set_enabled(settings_load_enabled());
     keymap_set_block_letters(settings_load_block_letters());
     keymap_set_hotkey(settings_load_hotkey());
+    keymap_set_hold_hotkey(settings_load_hold_hotkey());
     keymap_set_capture_message(WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE);
+    keymap_set_hold_capture_message(WM_OFFSET_PAD_HOLD_CAPTURE_DONE);
+    keymap_set_effective_changed_message(WM_OFFSET_PAD_EFFECTIVE_CHANGED);
     keymap_set_source_capture_message(WM_OFFSET_PAD_SOURCE_CAPTURE_DONE);
     keymap_set_reminder_message(WM_OFFSET_PAD_MODE_REMINDER);
     if (!ui_init(instance, main_window, light_icon, dark_icon,

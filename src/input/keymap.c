@@ -6,7 +6,7 @@
 
 #define REMINDER_PRESS_COUNT 3U
 #define REMINDER_WINDOW_MS 1500ULL
-#define REMINDER_COOLDOWN_MS 60000ULL
+#define REMINDER_COOLDOWN_MS 10000ULL
 
 typedef struct mapped_key {
     DWORD source;
@@ -28,15 +28,18 @@ static HHOOK hook;
 static HWND notify_window;
 static UINT changed_message;
 static UINT capture_message;
+static UINT hold_capture_message;
+static UINT effective_changed_message;
 static UINT source_capture_message;
 static UINT reminder_message;
 static ULONGLONG reminder_window_start;
 static ULONGLONG reminder_last_sent;
 static unsigned int reminder_press_count;
-static int reminder_ever_sent;
-static int reminder_sent_this_activation;
+static int reminder_sent_in_mode;
 static size_t source_capture_index = KEYMAP_KEY_COUNT;
 static int enabled;
+static int hold_active;
+static int hold_key_down;
 static int block_letters;
 static unsigned int blocked_letter_keys;
 static unsigned int passed_letter_keys;
@@ -49,6 +52,9 @@ static int block_hotkey_until_clear;
 static int hotkey_key_down;
 static int chord_down;
 static keymap_hotkey hotkey = {KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0};
+static keymap_hotkey hold_hotkey;
+
+static void release_mapped_keys(void);
 
 static unsigned int active_modifiers(void)
 {
@@ -69,9 +75,13 @@ static void clear_hotkey_block_if_released(void)
 static void note_unmapped_letter_press(void)
 {
     ULONGLONG now;
-    if (reminder_sent_this_activation || reminder_message == 0 || notify_window == NULL)
+    if (reminder_message == 0 || notify_window == NULL)
         return;
     now = GetTickCount64();
+    if (reminder_sent_in_mode && now - reminder_last_sent < REMINDER_COOLDOWN_MS) {
+        reminder_press_count = 0;
+        return;
+    }
     if (reminder_press_count == 0 || now - reminder_window_start > REMINDER_WINDOW_MS) {
         reminder_window_start = now;
         reminder_press_count = 1;
@@ -81,12 +91,9 @@ static void note_unmapped_letter_press(void)
     if (reminder_press_count < REMINDER_PRESS_COUNT)
         return;
     reminder_press_count = 0;
-    if (reminder_ever_sent && now - reminder_last_sent < REMINDER_COOLDOWN_MS)
-        return;
     if (PostMessageW(notify_window, reminder_message, 0, 0)) {
         reminder_last_sent = now;
-        reminder_ever_sent = 1;
-        reminder_sent_this_activation = 1;
+        reminder_sent_in_mode = 1;
     }
 }
 
@@ -101,27 +108,44 @@ static void send_digit(WORD digit)
     SendInput(2, input, sizeof(input[0]));
 }
 
+static void effective_mode_changed(int was_enabled)
+{
+    int is_enabled = enabled || hold_active;
+    if (was_enabled == is_enabled)
+        return;
+    if (!is_enabled)
+        release_mapped_keys();
+    reminder_press_count = 0;
+    if (is_enabled)
+        reminder_sent_in_mode = 0;
+}
+
+static void set_hold_active(int value)
+{
+    int was_enabled = keymap_is_enabled();
+    value = value != 0;
+    if (hold_active == value)
+        return;
+    hold_active = value;
+    effective_mode_changed(was_enabled);
+    if (effective_changed_message != 0 && notify_window != NULL &&
+        was_enabled != keymap_is_enabled())
+        PostMessageW(notify_window, effective_changed_message, 0, 0);
+}
+
 void keymap_set_enabled(int value)
 {
-    size_t index;
-    value = value != 0;
-    if (enabled == value)
-        return;
-    if (!value) {
-        for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
-            if (keys[index].down) {
-                keys[index].down = 0;
-                keys[index].swallow_up = 1;
-                keys[index].swallow_source = keys[index].source;
-            }
-        }
-    }
-    enabled = value;
-    reminder_press_count = 0;
-    reminder_sent_this_activation = 0;
+    int was_enabled = keymap_is_enabled();
+    enabled = value != 0;
+    effective_mode_changed(was_enabled);
 }
 
 int keymap_is_enabled(void)
+{
+    return enabled || hold_active;
+}
+
+int keymap_is_latched(void)
 {
     return enabled;
 }
@@ -257,17 +281,29 @@ static int source_in_use(DWORD source)
     return 0;
 }
 
+static int hotkey_valid(keymap_hotkey value)
+{
+    return (value.modifiers & ~15U) == 0 && value.key <= 255 &&
+           (value.modifiers != 0 || value.key != 0) &&
+           value.key != VK_ESCAPE && value.key != VK_SHIFT &&
+           value.key != VK_CONTROL && value.key != VK_MENU &&
+           value.key != VK_LSHIFT && value.key != VK_RSHIFT &&
+           value.key != VK_LCONTROL && value.key != VK_RCONTROL &&
+           value.key != VK_LMENU && value.key != VK_RMENU &&
+           value.key != VK_LWIN && value.key != VK_RWIN &&
+           !(value.modifiers == 0 && source_in_use(value.key));
+}
+
+static int same_hotkey(keymap_hotkey left, keymap_hotkey right)
+{
+    return left.modifiers == right.modifiers && left.key == right.key;
+}
+
 void keymap_set_hotkey(keymap_hotkey value)
 {
-    if ((value.modifiers & ~15U) != 0 || value.key > 255 ||
-        (value.modifiers == 0 && value.key == 0) ||
-        value.key == VK_ESCAPE || value.key == VK_SHIFT ||
-        value.key == VK_CONTROL || value.key == VK_MENU ||
-        value.key == VK_LSHIFT || value.key == VK_RSHIFT ||
-        value.key == VK_LCONTROL || value.key == VK_RCONTROL ||
-        value.key == VK_LMENU || value.key == VK_RMENU ||
-        value.key == VK_LWIN || value.key == VK_RWIN ||
-        (value.modifiers == 0 && source_in_use(value.key))) {
+    if (same_hotkey(value, hold_hotkey))
+        return;
+    if (!hotkey_valid(value)) {
         value.modifiers = KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT;
         value.key = 0;
     }
@@ -279,6 +315,23 @@ void keymap_set_hotkey(keymap_hotkey value)
 keymap_hotkey keymap_get_hotkey(void)
 {
     return hotkey;
+}
+
+void keymap_set_hold_hotkey(keymap_hotkey value)
+{
+    if ((value.modifiers != 0 || value.key != 0) &&
+        (!hotkey_valid(value) || same_hotkey(value, hotkey))) {
+        value.modifiers = 0;
+        value.key = 0;
+    }
+    set_hold_active(0);
+    hold_key_down = 0;
+    hold_hotkey = value;
+}
+
+keymap_hotkey keymap_get_hold_hotkey(void)
+{
+    return hold_hotkey;
 }
 
 static void append_hotkey_part(wchar_t *buffer, size_t capacity, const wchar_t *part)
@@ -335,6 +388,16 @@ void keymap_set_capture_message(UINT message)
     capture_message = message;
 }
 
+void keymap_set_hold_capture_message(UINT message)
+{
+    hold_capture_message = message;
+}
+
+void keymap_set_effective_changed_message(UINT message)
+{
+    effective_changed_message = message;
+}
+
 void keymap_set_source_capture_message(UINT message)
 {
     source_capture_message = message;
@@ -347,7 +410,12 @@ void keymap_set_reminder_message(UINT message)
 
 int keymap_is_capturing(void)
 {
-    return capturing;
+    return capturing == 1;
+}
+
+int keymap_is_hold_capturing(void)
+{
+    return capturing == 2;
 }
 
 int keymap_is_source_capturing(void)
@@ -374,10 +442,24 @@ static void release_mapped_keys(void)
 
 void keymap_begin_capture(void)
 {
-    if (keymap_is_source_capturing())
+    if (capturing || keymap_is_source_capturing())
         keymap_cancel_capture();
     release_mapped_keys();
+    set_hold_active(0);
+    hold_key_down = 0;
     capturing = 1;
+    capture_modifiers_seen = 0;
+    block_hotkey_until_clear = 1;
+}
+
+void keymap_begin_hold_capture(void)
+{
+    if (capturing || keymap_is_source_capturing())
+        keymap_cancel_capture();
+    release_mapped_keys();
+    set_hold_active(0);
+    hold_key_down = 0;
+    capturing = 2;
     capture_modifiers_seen = 0;
     block_hotkey_until_clear = 1;
 }
@@ -389,6 +471,8 @@ void keymap_begin_source_capture(size_t index)
     if (capturing || keymap_is_source_capturing())
         keymap_cancel_capture();
     release_mapped_keys();
+    set_hold_active(0);
+    hold_key_down = 0;
     source_capture_index = index;
     capture_modifiers_seen = 0;
     block_hotkey_until_clear = 1;
@@ -396,9 +480,10 @@ void keymap_begin_source_capture(size_t index)
 
 void keymap_cancel_capture(void)
 {
-    int was_hotkey = capturing;
+    int was_hotkey = capturing == 1;
+    int was_hold = capturing == 2;
     int was_source = keymap_is_source_capturing();
-    if (!was_hotkey && !was_source)
+    if (!was_hotkey && !was_hold && !was_source)
         return;
     capturing = 0;
     source_capture_index = KEYMAP_KEY_COUNT;
@@ -407,28 +492,42 @@ void keymap_cancel_capture(void)
     clear_hotkey_block_if_released();
     if (was_hotkey && capture_message != 0)
         PostMessageW(notify_window, capture_message, KEYMAP_CAPTURE_CANCELED, 0);
+    if (was_hold && hold_capture_message != 0)
+        PostMessageW(notify_window, hold_capture_message, KEYMAP_CAPTURE_CANCELED, 0);
     if (was_source && source_capture_message != 0)
         PostMessageW(notify_window, source_capture_message, KEYMAP_CAPTURE_CANCELED, 0);
 }
 
 static void finish_capture(keymap_hotkey value)
 {
-    int conflict = value.modifiers == 0 && source_in_use(value.key);
+    int is_hold = capturing == 2;
+    int empty = value.modifiers == 0 && value.key == 0;
+    int conflict = (!empty && !hotkey_valid(value)) ||
+                   (is_hold ? same_hotkey(value, hotkey) :
+                    same_hotkey(value, hold_hotkey));
+    UINT message = is_hold ? hold_capture_message : capture_message;
+    if (!is_hold && empty)
+        conflict = 1;
     capturing = 0;
     capture_modifiers_seen = 0;
-    if (!conflict)
-        keymap_set_hotkey(value);
+    if (!conflict) {
+        if (is_hold)
+            keymap_set_hold_hotkey(value);
+        else
+            keymap_set_hotkey(value);
+    }
     block_hotkey_until_clear = 1;
     clear_hotkey_block_if_released();
-    if (capture_message != 0)
-        PostMessageW(notify_window, capture_message,
+    if (message != 0)
+        PostMessageW(notify_window, message,
                      conflict ? KEYMAP_CAPTURE_INVALID : KEYMAP_CAPTURE_SAVED, 0);
 }
 
 static void finish_source_capture(DWORD source)
 {
     int valid = keymap_source_supported(source) && active_modifiers() == 0 &&
-                !(hotkey.modifiers == 0 && hotkey.key == source);
+                !(hotkey.modifiers == 0 && hotkey.key == source) &&
+                !(hold_hotkey.modifiers == 0 && hold_hotkey.key == source);
     size_t index = source_capture_index;
     source_capture_index = KEYMAP_KEY_COUNT;
     if (valid)
@@ -512,6 +611,12 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
         }
         clear_hotkey_block_if_released();
+        if (hold_hotkey.key == 0)
+            set_hold_active(hold_hotkey.modifiers != 0 &&
+                            mask == hold_hotkey.modifiers &&
+                            !block_hotkey_until_clear);
+        else if (hold_key_down)
+            set_hold_active(mask == hold_hotkey.modifiers);
         if (hotkey.key == 0 && hotkey.modifiers != 0) {
             if ((mask & hotkey.modifiers) != hotkey.modifiers)
                 chord_down = 0;
@@ -559,6 +664,9 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             captured_key = event->vkCode;
             if (event->vkCode == VK_ESCAPE)
                 keymap_cancel_capture();
+            else if (capturing == 2 && captured.modifiers == 0 &&
+                     (captured.key == VK_DELETE || captured.key == VK_BACK))
+                finish_capture((keymap_hotkey){0, 0});
             else
                 finish_capture(captured);
             return 1;
@@ -577,6 +685,21 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         return CallNextHookEx(hook, code, message, parameter);
     }
     clear_hotkey_block_if_released();
+    if (hold_hotkey.key != 0 && event->vkCode == hold_hotkey.key) {
+        if (hold_key_down) {
+            if (released) {
+                hold_key_down = 0;
+                set_hold_active(0);
+            }
+            return 1;
+        }
+        if (!released && !block_hotkey_until_clear &&
+            active_modifiers() == hold_hotkey.modifiers) {
+            hold_key_down = 1;
+            set_hold_active(1);
+            return 1;
+        }
+    }
     if (hotkey.key != 0 && event->vkCode == hotkey.key) {
         if (hotkey_key_down) {
             if (released)
@@ -608,7 +731,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 key->down = 0;
                 return 1;
             }
-        } else if (enabled) {
+        } else if (keymap_is_enabled()) {
             key->down = 1;
             send_digit(key->target);
             return 1;
@@ -617,7 +740,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     }
     if (!released && event->vkCode >= 'A' && event->vkCode <= 'Z') {
         unsigned int bit = 1U << (event->vkCode - 'A');
-        if (enabled &&
+        if (keymap_is_enabled() &&
             !(active_modifiers() & (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_WIN))) {
             note_unmapped_letter_press();
             if (block_letters) {
@@ -642,6 +765,7 @@ void keymap_uninstall(void)
 {
     capturing = 0;
     source_capture_index = KEYMAP_KEY_COUNT;
+    set_hold_active(0);
     keymap_set_enabled(0);
     if (hook != NULL) {
         UnhookWindowsHookEx(hook);

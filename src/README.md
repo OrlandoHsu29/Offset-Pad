@@ -45,9 +45,11 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/input tests\keymap_test.c 
 
 ## 设置与资源
 
-当前模式、快捷键、自定义键位和“屏蔽字母输入”开关保存在 `HKCU\Software\Offset Pad`；先前保存的 11 键位设置会保留前 10 个数字映射；开机启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
+当前模式、两个快捷键、自定义键位和“屏蔽字母防误触”开关保存在 `HKCU\Software\Offset Pad`；先前保存的 11 键位设置会保留前 10 个数字映射；开机启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
 
-误按提醒仅在小键盘模式下统计未映射的普通字母首次按下：1.5 秒内 3 次触发；同一次开启最多提醒一次，跨次开启至少间隔 60 秒。已映射键、长按重复和 Ctrl/Alt/Win 组合键不计数。通知通过现有托盘图标发送。
+“屏蔽字母防误触”新安装默认开启；已保存的开关值不变。“按住输入”快捷键默认未设置，松开后恢复原先锁定的模式；它不会改写持久化的模式开关。
+
+误按提醒仅在小键盘模式下统计未映射的普通字母首次按下：1.5 秒内 3 次触发；同次开启小键盘时提醒后冷却 10 秒，冷却期按键不计入下一轮；切回普通模式再开启会清除冷却，可立即重新统计。已映射键、长按重复和 Ctrl/Alt/Win 组合键不计数。通知通过现有托盘图标发送。
 
 更新托盘图标后，可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\crop-tray-icons.ps1`，等比裁紧透明边距；脚本会在被忽略的 `build/` 中保存源文件备份。更新窗口 Logo 后，可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\crop-logo.ps1`，处理窗口 ICO 和 README 使用的 PNG。
 

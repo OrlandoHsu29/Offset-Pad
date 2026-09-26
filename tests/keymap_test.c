@@ -317,9 +317,7 @@ int main(void)
     key_event('C', WM_KEYUP);
     assert(reminder_posts == 1);
 
-    keymap_set_enabled(0);
-    keymap_set_enabled(1);
-    now_ms = 105000;
+    now_ms = 114899;
     key_event('A', WM_KEYDOWN);
     key_event('A', WM_KEYUP);
     key_event('B', WM_KEYDOWN);
@@ -327,15 +325,100 @@ int main(void)
     key_event('C', WM_KEYDOWN);
     key_event('C', WM_KEYUP);
     assert(reminder_posts == 1);
-    now_ms = 165000;
+
+    now_ms = 114900;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    now_ms = 115100;
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    now_ms = 115300;
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 2);
+
+    keymap_set_enabled(0);
+    keymap_set_enabled(1);
+    now_ms = 115301;
     key_event('A', WM_KEYDOWN);
     key_event('A', WM_KEYUP);
     key_event('B', WM_KEYDOWN);
     key_event('B', WM_KEYUP);
     key_event('C', WM_KEYDOWN);
     key_event('C', WM_KEYUP);
-    assert(reminder_posts == 2);
+    assert(reminder_posts == 3);
+
+    now_ms = 125300;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 3);
+    now_ms = 125301;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 4);
     keymap_set_enabled(0);
+
+    /* A held shortcut overlays the saved mode, including while keys are mapped. */
+    keymap_set_block_letters(0);
+    keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 'Q'});
+    assert(!keymap_is_enabled() && !keymap_is_latched());
+    modifier(VK_LCONTROL, 1);
+    assert(key_event('Q', WM_KEYDOWN) == 1);
+    assert(keymap_is_enabled() && !keymap_is_latched());
+    sent_count = 0;
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    modifier(VK_LCONTROL, 0);
+    assert(!keymap_is_enabled());
+    assert(key_event('Q', WM_KEYUP) == 1);
+    sent_count = 0;
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(sent_count == 0);
+
+    modifier(VK_LCONTROL, 1);
+    key_event('Q', WM_KEYDOWN);
+    keymap_set_enabled(1);
+    assert(keymap_is_latched());
+    key_event('Q', WM_KEYUP);
+    modifier(VK_LCONTROL, 0);
+    assert(keymap_is_enabled() && keymap_is_latched());
+    keymap_set_enabled(0);
+
+    /* Modifier-only hold ends on release and does not latch. */
+    keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
+    modifier(VK_LCONTROL, 1);
+    modifier(VK_LMENU, 1);
+    assert(keymap_is_enabled() && !keymap_is_latched());
+    modifier(VK_LMENU, 0);
+    assert(!keymap_is_enabled());
+    modifier(VK_LCONTROL, 0);
+
+    /* Capture rejects reserved and mapped keys; Delete clears the hold binding. */
+    keymap_begin_hold_capture();
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(!keymap_is_hold_capturing());
+    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT));
+    keymap_begin_hold_capture();
+    key_event(VK_DELETE, WM_KEYDOWN);
+    key_event(VK_DELETE, WM_KEYUP);
+    assert(keymap_get_hold_hotkey().modifiers == 0 && keymap_get_hold_hotkey().key == 0);
+    keymap_set_hold_hotkey((keymap_hotkey){0, 'Q'});
+    keymap_begin_source_capture(6);
+    key_event('Q', WM_KEYDOWN);
+    key_event('Q', WM_KEYUP);
+    assert(keymap_get_source(6) == 'N');
+    keymap_set_hold_hotkey((keymap_hotkey){0, 0});
 
     puts("keymap tests passed");
     return 0;

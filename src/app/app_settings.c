@@ -40,14 +40,14 @@ int settings_save_enabled(int enabled)
 int settings_load_block_letters(void)
 {
     HKEY key;
-    DWORD value = 0;
+    DWORD value = 1;
     DWORD type = 0;
     DWORD size = sizeof(value);
     if (RegOpenKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
-        return 0;
+        return 1;
     if (RegQueryValueExW(key, L"BlockLetterInput", NULL, &type, (BYTE *)&value, &size) != ERROR_SUCCESS ||
         type != REG_DWORD || size != sizeof(value))
-        value = 0;
+        value = 1;
     RegCloseKey(key);
     return value != 0;
 }
@@ -94,6 +94,39 @@ int settings_save_hotkey(keymap_hotkey hotkey)
     if (result != ERROR_SUCCESS)
         return 0;
     result = RegSetValueExW(key, L"ToggleHotkey", 0, REG_DWORD,
+                            (const BYTE *)&value, sizeof(value));
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS;
+}
+
+keymap_hotkey settings_load_hold_hotkey(void)
+{
+    HKEY key;
+    DWORD value = 0;
+    DWORD type = 0;
+    DWORD size = sizeof(value);
+    keymap_hotkey result;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS) {
+        if (RegQueryValueExW(key, L"HoldHotkey", NULL, &type,
+                             (BYTE *)&value, &size) != ERROR_SUCCESS ||
+            type != REG_DWORD || size != sizeof(value))
+            value = 0;
+        RegCloseKey(key);
+    }
+    result.modifiers = value >> 16;
+    result.key = value & 0xFFFFU;
+    return result;
+}
+
+int settings_save_hold_hotkey(keymap_hotkey hotkey)
+{
+    HKEY key;
+    DWORD value = (DWORD)((hotkey.modifiers << 16) | hotkey.key);
+    LONG result = RegCreateKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, NULL, 0,
+                                  KEY_SET_VALUE, NULL, &key, NULL);
+    if (result != ERROR_SUCCESS)
+        return 0;
+    result = RegSetValueExW(key, L"HoldHotkey", 0, REG_DWORD,
                             (const BYTE *)&value, sizeof(value));
     RegCloseKey(key);
     return result == ERROR_SUCCESS;
