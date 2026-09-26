@@ -70,6 +70,44 @@ int settings_save_hotkey(keymap_hotkey hotkey)
     return result == ERROR_SUCCESS;
 }
 
+int settings_load_sources(DWORD sources[KEYMAP_KEY_COUNT])
+{
+    HKEY key;
+    DWORD stored[KEYMAP_KEY_COUNT + 1];
+    DWORD type = 0;
+    DWORD size = sizeof(stored);
+    LONG result;
+    size_t index;
+    if (sources == NULL)
+        return 0;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
+        return 0;
+    result = RegQueryValueExW(key, L"SourceKeys", NULL, &type, (BYTE *)stored, &size);
+    RegCloseKey(key);
+    if (result != ERROR_SUCCESS || type != REG_BINARY ||
+        (size != sizeof(DWORD) * KEYMAP_KEY_COUNT && size != sizeof(stored)))
+        return 0;
+    for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
+        sources[index] = stored[index];
+    return 1;
+}
+
+int settings_save_sources(const DWORD sources[KEYMAP_KEY_COUNT])
+{
+    HKEY key;
+    LONG result;
+    if (sources == NULL)
+        return 0;
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, NULL, 0,
+                             KEY_SET_VALUE, NULL, &key, NULL);
+    if (result != ERROR_SUCCESS)
+        return 0;
+    result = RegSetValueExW(key, L"SourceKeys", 0, REG_BINARY,
+                            (const BYTE *)sources, sizeof(DWORD) * KEYMAP_KEY_COUNT);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS;
+}
+
 int settings_autostart_enabled(void)
 {
     HKEY key;

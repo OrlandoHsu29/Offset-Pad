@@ -9,5 +9,7 @@ int settings_autostart_enabled(void);
 int settings_set_autostart(int enabled);
 keymap_hotkey settings_load_hotkey(void);
 int settings_save_hotkey(keymap_hotkey hotkey);
+int settings_load_sources(DWORD sources[KEYMAP_KEY_COUNT]);
+int settings_save_sources(const DWORD sources[KEYMAP_KEY_COUNT]);
 
 #endif

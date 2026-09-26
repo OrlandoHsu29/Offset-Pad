@@ -76,9 +76,26 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_refresh();
         return 0;
     case WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE:
-        if (wparam != 0 && !settings_save_hotkey(keymap_get_hotkey()))
+        if (wparam == KEYMAP_CAPTURE_INVALID)
+            MessageBoxW(window, L"该按键已用于数字映射，请选择其他快捷键。",
+                        L"Offset Pad", MB_OK | MB_ICONINFORMATION);
+        else if (wparam == KEYMAP_CAPTURE_SAVED &&
+                 !settings_save_hotkey(keymap_get_hotkey()))
             MessageBoxW(window, L"无法保存快捷键；本次运行仍会使用新快捷键。",
                         L"Offset Pad", MB_OK | MB_ICONERROR);
+        ui_refresh();
+        return 0;
+    case WM_OFFSET_PAD_SOURCE_CAPTURE_DONE:
+        if (wparam == KEYMAP_CAPTURE_INVALID) {
+            MessageBoxW(window, L"请按单个字母、数字、常用符号或空格，且不要占用单键切换快捷键；Esc 可取消。",
+                        L"Offset Pad", MB_OK | MB_ICONINFORMATION);
+        } else if (wparam == KEYMAP_CAPTURE_SAVED) {
+            DWORD sources[KEYMAP_KEY_COUNT];
+            keymap_get_sources(sources);
+            if (!settings_save_sources(sources))
+                MessageBoxW(window, L"无法保存按键映射；本次运行仍会使用新键位。",
+                            L"Offset Pad", MB_OK | MB_ICONERROR);
+        }
         ui_refresh();
         return 0;
     case WM_CLOSE:
@@ -105,6 +122,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     int small_icon_width;
     int small_icon_height;
     MSG message;
+    DWORD sources[KEYMAP_KEY_COUNT];
     int result;
     int background = wcsstr(GetCommandLineW(), L"--background") != NULL;
     int exit_code = 0;
@@ -166,9 +184,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
         exit_code = 1;
         goto cleanup_class;
     }
+    if (settings_load_sources(sources))
+        keymap_set_sources(sources);
     keymap_set_enabled(settings_load_enabled());
     keymap_set_hotkey(settings_load_hotkey());
     keymap_set_capture_message(WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE);
+    keymap_set_source_capture_message(WM_OFFSET_PAD_SOURCE_CAPTURE_DONE);
     if (!ui_init(instance, main_window, light_icon, dark_icon,
                  tray_o_icon, tray_9_icon, &actions)) {
         exit_code = 1;

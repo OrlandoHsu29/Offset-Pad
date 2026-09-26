@@ -79,6 +79,30 @@ static RECT scaled_rect(int left, int top, int right, int bottom)
     return rect;
 }
 
+static RECT source_key_rect(size_t index)
+{
+    int row;
+    int column;
+    int left;
+    if (index == 9)
+        return scaled_rect(74, 307, 177, 331);
+    row = (int)index / 3;
+    column = (int)index % 3;
+    left = 74 + (row == 1 ? 11 : 0) + column * 37;
+    return scaled_rect(left, 220 + row * 29, left + 29, 244 + row * 29);
+}
+
+static int source_key_at(POINT point)
+{
+    size_t index;
+    for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
+        RECT rect = source_key_rect(index);
+        if (PtInRect(&rect, point))
+            return (int)index;
+    }
+    return -1;
+}
+
 static void rounded_box(HDC dc, RECT rect, COLORREF fill, COLORREF outline, int radius)
 {
     rounded_box_draw(dc, rect, fill, outline, scale(radius));
@@ -95,12 +119,15 @@ static void draw_label(HDC dc, const wchar_t *label, RECT rect,
 }
 
 static void draw_keycap(HDC dc, int left, int top, int width,
-                        const wchar_t *label, int output)
+                        const wchar_t *label, int output, int selected)
 {
     RECT rect = scaled_rect(left, top, left + width, top + 24);
-    rounded_box(dc, rect, output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP,
-                COLOR_BORDER, 7);
-    draw_label(dc, label, rect, body_font, COLOR_INK,
+    rounded_box(dc, rect,
+                selected ? COLOR_ACCENT : (output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP),
+                selected ? COLOR_ACCENT : COLOR_BORDER, 7);
+    draw_label(dc, label, rect,
+               width <= 40 && wcslen(label) > 2 ? small_font : body_font,
+               selected ? COLOR_WHITE : COLOR_INK,
                DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
@@ -130,7 +157,7 @@ static void paint_settings(HDC dc, const RECT *client)
     draw_label(dc, L"Offset Pad · 小配列也可以拥有小键盘", rect, small_font,
                COLOR_MUTED, DT_SINGLELINE | DT_VCENTER);
 
-    rect = scaled_rect(24, 89, 424, 164);
+    rect = scaled_rect(24, 89, 400, 164);
     rounded_box(dc, rect, COLOR_TINT, COLOR_TINT, 14);
     rect = scaled_rect(43, 107, 332, 134);
     draw_label(dc, keymap_is_enabled() ? L"数字小键盘已开启" : L"当前为普通键盘模式",
@@ -138,7 +165,7 @@ static void paint_settings(HDC dc, const RECT *client)
     rect = scaled_rect(43, 135, 386, 154);
     draw_label(dc, hint, rect, small_font,
                COLOR_MUTED, DT_SINGLELINE | DT_VCENTER);
-    rect = scaled_rect(365, 112, 405, 137);
+    rect = scaled_rect(341, 112, 381, 137);
     rounded_box(dc, rect, keymap_is_enabled() ? COLOR_ACCENT : COLOR_WHITE,
                 keymap_is_enabled() ? COLOR_ACCENT : COLOR_BORDER, 12);
     draw_label(dc, keymap_is_enabled() ? L"ON" : L"OFF", rect, small_font,
@@ -148,17 +175,14 @@ static void paint_settings(HDC dc, const RECT *client)
     rect = scaled_rect(24, 179, 250, 205);
     draw_label(dc, L"按键映射", rect, heading_font, COLOR_INK,
                DT_SINGLELINE | DT_VCENTER);
-    rect = scaled_rect(332, 185, 424, 203);
-    draw_label(dc, L"NUMPAD", rect, small_font, COLOR_MUTED,
+    rect = scaled_rect(202, 185, 400, 203);
+    draw_label(dc, keymap_is_source_capturing()
+                   ? L"按新按键 · Esc 取消" : L"点击左侧键帽图按键可修改映射",
+               rect, small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
-    rect = scaled_rect(24, 211, 424, 341);
+    rect = scaled_rect(24, 211, 400, 341);
     rounded_box(dc, rect, COLOR_WHITE, COLOR_BORDER, 12);
     {
-        static const wchar_t *source_keys[3][3] = {
-            {L"U", L"I", L"O"},
-            {L"J", L"K", L"L"},
-            {L"N", L"M", L","}
-        };
         static const wchar_t *target_keys[3][3] = {
             {L"7", L"8", L"9"},
             {L"4", L"5", L"6"},
@@ -171,21 +195,37 @@ static void paint_settings(HDC dc, const RECT *client)
             if (row < 3) {
                 int source_left = 74 + (row == 1 ? 11 : 0);
                 for (column = 0; column < 3; ++column) {
+                    size_t index = (size_t)(row * 3 + column);
+                    wchar_t source_label[16];
+                    int selected = keymap_is_source_capturing() &&
+                                   keymap_capturing_source() == index;
+                    keymap_format_source(source_label,
+                                         sizeof(source_label) / sizeof(source_label[0]),
+                                         keymap_get_source(index));
                     draw_keycap(dc, source_left + column * 37, top, 29,
-                                source_keys[row][column], 0);
-                    draw_keycap(dc, 283 + column * 37, top, 29,
-                                target_keys[row][column], 1);
+                                selected ? L"?" :
+                                keymap_get_source(index) == VK_CAPITAL ? L"CL" : source_label,
+                                0, selected);
+                    draw_keycap(dc, 275 + column * 37, top, 29,
+                                target_keys[row][column], 1, 0);
                 }
             } else {
-                draw_keycap(dc, 74, top, 103, L"空格", 0);
-                draw_keycap(dc, 302, top, 66, L"0", 1);
+                int selected = keymap_is_source_capturing() &&
+                               keymap_capturing_source() == 9;
+                wchar_t source_label[16];
+                keymap_format_source(source_label,
+                                     sizeof(source_label) / sizeof(source_label[0]),
+                                     keymap_get_source(9));
+                draw_keycap(dc, 74, top, 103,
+                            selected ? L"按键" : source_label, 0, selected);
+                draw_keycap(dc, 294, top, 66, L"0", 1, 0);
             }
-            rect = scaled_rect(225, top, 250, top + 24);
+            rect = scaled_rect(215, top, 240, top + 24);
             draw_label(dc, L"→", rect, body_font, COLOR_MUTED,
                        DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
     }
-    rect = scaled_rect(24, 514, 424, 533);
+    rect = scaled_rect(24, 514, 400, 533);
     draw_label(dc, L"关闭窗口后继续在托盘运行", rect, small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
@@ -324,23 +364,39 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_CREATE:
         hotkey_button = CreateWindowExW(0, L"BUTTON", L"切换快捷键",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                         scale(24), scale(353), scale(400), scale(46),
+                                         scale(24), scale(353), scale(376), scale(46),
                                          window, (HMENU)(INT_PTR)ID_HOTKEY, instance, NULL);
         autostart_check = CreateWindowExW(0, L"BUTTON", L"开机时启动",
                                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                           scale(24), scale(409), scale(400), scale(46),
+                                           scale(24), scale(409), scale(376), scale(46),
                                            window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
         toggle_button = CreateWindowExW(0, L"BUTTON", L"开启小键盘",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                         scale(24), scale(467), scale(192), scale(39),
+                                         scale(24), scale(467), scale(180), scale(39),
                                          window, (HMENU)(INT_PTR)ID_TOGGLE, instance, NULL);
         CreateWindowExW(0, L"BUTTON", L"关闭",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(232), scale(467), scale(192), scale(39),
+                        scale(220), scale(467), scale(180), scale(39),
                         window, (HMENU)(INT_PTR)ID_CLOSE, instance, NULL);
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_SETCURSOR:
+        if (LOWORD(lparam) == HTCLIENT) {
+            POINT point;
+            HWND hovered = (HWND)wparam;
+            int id = GetParent(hovered) == window ? GetDlgCtrlID(hovered) : 0;
+            GetCursorPos(&point);
+            ScreenToClient(window, &point);
+            if (source_key_at(point) >= 0 ||
+                id == ID_HOTKEY || id == ID_AUTOSTART ||
+                id == ID_TOGGLE || id == ID_CLOSE)
+                SetCursor(LoadCursorW(NULL, IDC_HAND));
+            else
+                SetCursor(LoadCursorW(NULL, IDC_ARROW));
+            return TRUE;
+        }
+        break;
     case WM_PAINT:
         {
             PAINTSTRUCT paint;
@@ -369,6 +425,18 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         if (lparam != 0 && ((DRAWITEMSTRUCT *)lparam)->CtlType == ODT_BUTTON) {
             draw_button((const DRAWITEMSTRUCT *)lparam);
             return TRUE;
+        }
+        break;
+    case WM_LBUTTONUP:
+        {
+            POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+            int index = source_key_at(point);
+            if (index >= 0) {
+                keymap_cancel_capture();
+                keymap_begin_source_capture((size_t)index);
+                ui_refresh();
+                return 0;
+            }
         }
         break;
     case WM_COMMAND:
@@ -401,7 +469,8 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         actions.restart_background();
         return 0;
     case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE && keymap_is_capturing()) {
+        if (LOWORD(wparam) == WA_INACTIVE &&
+            (keymap_is_capturing() || keymap_is_source_capturing())) {
             keymap_cancel_capture();
             ui_refresh();
         }
@@ -431,6 +500,7 @@ int ui_init(HINSTANCE app_instance, HWND window, HICON inactive_icon,
     definition.lpfnWndProc = settings_proc;
     definition.hInstance = instance;
     definition.hIcon = current_icon();
+    definition.hCursor = LoadCursorW(NULL, IDC_ARROW);
     definition.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
     definition.lpszClassName = settings_class;
     if (!RegisterClassW(&definition))
@@ -502,7 +572,7 @@ void ui_show(void)
             small_font = CreateFontW(-scale(12), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        rect = scaled_rect(0, 0, 448, 542);
+        rect = scaled_rect(0, 0, 424, 542);
         AdjustWindowRect(&rect, style, FALSE);
         width = rect.right - rect.left;
         height = rect.bottom - rect.top;

@@ -17,10 +17,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Release
 安装 Inno Setup 7 后运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -Version 0.1.1
 ```
 
-脚本会先进行 Release 构建并检查 exe 为 x64，然后输出 `dist\Offset-Pad-v0.1.0-windows-x64-setup.exe` 和 `.sha256` 校验文件。工具未被自动找到时，可用 `-Compiler` 和 `-InnoCompiler` 指定完整路径。发布新版本时，同步更新 `build-installer.ps1` 和 `installer/offset-pad.iss` 中的默认版本号。
+脚本会先进行 Release 构建并检查 exe 为 x64，然后输出 `dist\Offset-Pad-v0.1.1-windows-x64-setup.exe` 和 `.sha256` 校验文件。工具未被自动找到时，可用 `-Compiler` 和 `-InnoCompiler` 指定完整路径。发布新版本时，同步更新 `build-installer.ps1` 和 `installer/offset-pad.iss` 中的默认版本号。
 
 ## 测试
 
@@ -45,7 +45,7 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/input tests\keymap_test.c 
 
 ## 设置与资源
 
-当前模式和快捷键保存在 `HKCU\Software\Offset Pad`；开机启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
+当前模式、快捷键和自定义键位保存在 `HKCU\Software\Offset Pad`；先前保存的 11 键位设置会保留前 10 个数字映射；开机启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
 
 更新托盘图标后，可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\crop-tray-icons.ps1`，等比裁紧透明边距；脚本会在被忽略的 `build/` 中保存源文件备份。更新窗口 Logo 后，可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\crop-logo.ps1`，处理窗口 ICO 和 README 使用的 PNG。
 
