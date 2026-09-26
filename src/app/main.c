@@ -203,6 +203,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     if (settings_load_sources(sources))
         keymap_set_sources(sources);
     keymap_set_enabled(settings_load_enabled());
+    keymap_set_hotkeys_enabled(settings_load_hotkeys_enabled());
     keymap_set_block_letters(settings_load_block_letters());
     keymap_set_hotkey(settings_load_hotkey());
     keymap_set_hold_hotkey(settings_load_hold_hotkey());

@@ -24,6 +24,8 @@ void keymap_uninstall(void);
 void keymap_set_enabled(int enabled);
 int keymap_is_enabled(void);
 int keymap_is_latched(void);
+void keymap_set_hotkeys_enabled(int enabled);
+int keymap_hotkeys_enabled(void);
 void keymap_set_hold_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hold_hotkey(void);
 void keymap_set_block_letters(int enabled);

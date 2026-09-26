@@ -20,6 +20,7 @@
 #define MENU_TOGGLE 202
 #define MENU_AUTOSTART 203
 #define MENU_EXIT 204
+#define MENU_DISABLE_HOTKEYS 205
 #define IDI_APP_ICON_LIGHT 101
 #define IDI_APP_ICON_DARK 102
 
@@ -137,22 +138,37 @@ static void draw_keycap(HDC dc, int left, int top, int width,
                DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
+static int hotkey_is_set(keymap_hotkey hotkey)
+{
+    return hotkey.modifiers != 0 || hotkey.key != 0;
+}
+
 static void paint_settings(HDC dc, const RECT *client)
 {
     RECT rect;
     wchar_t shortcut[96];
-    wchar_t hint[128];
+    wchar_t hint[192];
     HBRUSH background = CreateSolidBrush(COLOR_WHITE);
     COLORREF accent = keymap_is_enabled() ? COLOR_ACCENT : COLOR_MUTED;
     FillRect(dc, client, background);
     DeleteObject(background);
-    keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
-                         keymap_get_hotkey());
-    if (keymap_is_capturing() || keymap_is_hold_capturing())
-        lstrcpynW(hint, L"正在录入快捷键，Esc 取消",
+    if (keymap_is_capturing() || keymap_is_hold_capturing()) {
+        lstrcpynW(hint, L"录入快捷键：Del/Back 清除，Esc 取消",
                   (int)(sizeof(hint) / sizeof(hint[0])));
-    else
-        swprintf(hint, sizeof(hint) / sizeof(hint[0]), L"按 %ls 随时切换", shortcut);
+    } else if (hotkey_is_set(keymap_get_hotkey())) {
+        keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
+                             keymap_get_hotkey());
+        swprintf(hint, sizeof(hint) / sizeof(hint[0]),
+                 L"按 %ls 随时切换模式", shortcut);
+    } else if (hotkey_is_set(keymap_get_hold_hotkey())) {
+        keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
+                             keymap_get_hold_hotkey());
+        swprintf(hint, sizeof(hint) / sizeof(hint[0]),
+                 L"按住 %ls 后切换为小键盘模式", shortcut);
+    } else {
+        lstrcpynW(hint, L"请先设置一个快捷键",
+                  (int)(sizeof(hint) / sizeof(hint[0])));
+    }
 
     DrawIconEx(dc, scale(24), scale(20), current_logo(), scale(48), scale(48),
                0, NULL, DI_NORMAL);
@@ -170,7 +186,7 @@ static void paint_settings(HDC dc, const RECT *client)
                rect, heading_font, COLOR_INK, DT_SINGLELINE | DT_VCENTER);
     rect = scaled_rect(43, 135, 386, 154);
     draw_label(dc, hint, rect, small_font,
-               COLOR_MUTED, DT_SINGLELINE | DT_VCENTER);
+               COLOR_MUTED, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     rect = scaled_rect(341, 112, 381, 137);
     rounded_box(dc, rect, keymap_is_enabled() ? COLOR_ACCENT : COLOR_WHITE,
                 keymap_is_enabled() ? COLOR_ACCENT : COLOR_BORDER, 12);
@@ -239,51 +255,59 @@ static void paint_settings(HDC dc, const RECT *client)
 static void draw_shortcut_value(HDC dc, const wchar_t *shortcut, RECT rect)
 {
     wchar_t buffer[96];
-    wchar_t lines[5][96] = {{0}};
+    wchar_t lines[2][96] = {{0}};
     wchar_t candidate[96];
     wchar_t *part;
-    int line_count = 0;
+    int part_count = 0;
+    int line_count;
     int line_height;
     int top;
     int index;
+    int use_compact = 0;
+    SIZE extent;
     HFONT value_font;
     HGDIOBJ old_font = SelectObject(dc, small_font != NULL ? small_font :
                                     GetStockObject(DEFAULT_GUI_FONT));
     lstrcpynW(buffer, shortcut, (int)(sizeof(buffer) / sizeof(buffer[0])));
     part = buffer;
-    while (*part != L'\0') {
+    while (*part != L'\0' && part_count < 5) {
         wchar_t *separator = wcsstr(part, L" + ");
-        SIZE extent;
+        int line = part_count < 2 ? 0 : 1;
         if (separator != NULL)
             *separator = L'\0';
-        if (line_count == 0) {
-            lstrcpynW(lines[0], part, (int)(sizeof(lines[0]) / sizeof(lines[0][0])));
-            line_count = 1;
+        if (part_count == 0) {
+            lstrcpynW(lines[0], part,
+                      (int)(sizeof(lines[0]) / sizeof(lines[0][0])));
+        } else if (part_count == 2) {
+            swprintf(lines[1], sizeof(lines[1]) / sizeof(lines[1][0]),
+                     L"+ %ls", part);
         } else {
             swprintf(candidate, sizeof(candidate) / sizeof(candidate[0]),
-                     L"%ls + %ls", lines[line_count - 1], part);
-            GetTextExtentPoint32W(dc, candidate, (int)wcslen(candidate), &extent);
-            if (extent.cx <= rect.right - rect.left || line_count == 5)
-                lstrcpynW(lines[line_count - 1], candidate,
-                          (int)(sizeof(lines[0]) / sizeof(lines[0][0])));
-            else {
-                swprintf(lines[line_count++], sizeof(lines[0]) / sizeof(lines[0][0]),
-                         L"+ %ls", part);
-            }
+                     L"%ls + %ls", lines[line], part);
+            lstrcpynW(lines[line], candidate,
+                      (int)(sizeof(lines[line]) / sizeof(lines[line][0])));
         }
+        ++part_count;
         if (separator == NULL)
             break;
         part = separator + 3;
     }
+    line_count = part_count > 2 ? 2 : part_count;
+    for (index = 0; index < line_count; ++index) {
+        GetTextExtentPoint32W(dc, lines[index], (int)wcslen(lines[index]),
+                              &extent);
+        if (extent.cx > rect.right - rect.left)
+            use_compact = 1;
+    }
     SelectObject(dc, old_font);
-    value_font = line_count >= 4 && compact_font != NULL ? compact_font : small_font;
-    line_height = scale(line_count >= 5 ? 9 : (line_count >= 4 ? 11 : 15));
+    value_font = use_compact && compact_font != NULL ? compact_font : small_font;
+    line_height = scale(15);
     top = rect.top + (rect.bottom - rect.top - line_count * line_height) / 2;
     for (index = 0; index < line_count; ++index) {
         RECT line_rect = {rect.left, top + index * line_height,
                           rect.right, top + (index + 1) * line_height};
         draw_label(dc, lines[index], line_rect, value_font, COLOR_MUTED,
-                   DT_SINGLELINE | DT_RIGHT | DT_VCENTER);
+                   DT_SINGLELINE | DT_RIGHT | DT_VCENTER | DT_END_ELLIPSIS);
     }
 }
 
@@ -307,11 +331,11 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         fill = pressed ? COLOR_TINT : COLOR_WHITE;
         rounded_box(dc, rect, fill, focused ? COLOR_ACCENT : COLOR_BORDER, 12);
         name_rect.left += scale(14);
-        name_rect.right = name_rect.left + scale(80);
-        draw_label(dc, is_hold ? L"按住时输入" : L"切换模式",
+        name_rect.right = name_rect.left + scale(is_hold ? 80 : 92);
+        draw_label(dc, is_hold ? L"按住时输入" : L"按下切换模式",
                    name_rect, control_font, COLOR_INK,
                    DT_SINGLELINE | DT_VCENTER);
-        value_rect.left += scale(100);
+        value_rect.left += scale(is_hold ? 100 : 112);
         value_rect.right -= scale(14);
         if (is_hold && keymap_is_hold_capturing())
             lstrcpynW(shortcut, L"录入中",
@@ -319,9 +343,9 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         else if (!is_hold && keymap_is_capturing())
             lstrcpynW(shortcut, L"录入中",
                       (int)(sizeof(shortcut) / sizeof(shortcut[0])));
-        else if (is_hold && keymap_get_hold_hotkey().modifiers == 0 &&
-                 keymap_get_hold_hotkey().key == 0)
-            lstrcpynW(shortcut, L"点击设置",
+        else if (!hotkey_is_set(is_hold ? keymap_get_hold_hotkey() :
+                                keymap_get_hotkey()))
+            lstrcpynW(shortcut, L"未设置",
                       (int)(sizeof(shortcut) / sizeof(shortcut[0])));
         else
             keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
@@ -339,7 +363,7 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         rounded_box(dc, rect, fill, focused ? COLOR_ACCENT : COLOR_BORDER, 12);
         rect.left += scale(14);
         rect.right -= scale(58);
-        draw_label(dc, item->CtlID == ID_AUTOSTART ? L"开机自启" : L"屏蔽字母防误触",
+        draw_label(dc, item->CtlID == ID_AUTOSTART ? L"开机时启动" : L"屏蔽字母防误触",
                    rect, control_font, COLOR_INK,
                    DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
         switch_rect.left = switch_rect.right - scale(54);
@@ -458,21 +482,21 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
 {
     switch (message) {
     case WM_CREATE:
-        hotkey_button = CreateWindowExW(0, L"BUTTON", L"切换模式",
+        hotkey_button = CreateWindowExW(0, L"BUTTON", L"按下切换模式",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                         scale(24), scale(353), scale(180), scale(46),
+                                         scale(24), scale(353), scale(188), scale(46),
                                          window, (HMENU)(INT_PTR)ID_HOTKEY, instance, NULL);
         hold_hotkey_button = CreateWindowExW(0, L"BUTTON", L"按住输入",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                              scale(220), scale(353), scale(180), scale(46),
+                                              scale(224), scale(353), scale(176), scale(46),
                                               window, (HMENU)(INT_PTR)ID_HOLD_HOTKEY, instance, NULL);
         block_letters_check = CreateWindowExW(0, L"BUTTON", L"屏蔽字母防误触",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                              scale(24), scale(409), scale(220), scale(46),
+                                              scale(24), scale(409), scale(200), scale(46),
                                               window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS, instance, NULL);
-        autostart_check = CreateWindowExW(0, L"BUTTON", L"开机自启",
+        autostart_check = CreateWindowExW(0, L"BUTTON", L"开机时启动",
                                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                           scale(256), scale(409), scale(144), scale(46),
+                                           scale(236), scale(409), scale(164), scale(46),
                                            window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
         toggle_button = CreateWindowExW(0, L"BUTTON", L"开启小键盘",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
@@ -578,7 +602,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         case ID_AUTOSTART:
             keymap_cancel_capture();
             if (!settings_set_autostart(!settings_autostart_enabled()))
-                show_error(L"无法保存开机自启设置。");
+                show_error(L"无法保存开机时启动设置。");
             ui_refresh();
             return 0;
         case ID_CLOSE:
@@ -748,8 +772,11 @@ static void show_tray_menu(void)
     AppendMenuW(menu, MF_STRING, MENU_OPEN, L"打开设置");
     AppendMenuW(menu, MF_STRING, MENU_TOGGLE,
                 keymap_is_latched() ? L"关闭小键盘" : L"开启小键盘");
+    AppendMenuW(menu, MF_STRING |
+                (keymap_hotkeys_enabled() ? 0 : MF_CHECKED),
+                MENU_DISABLE_HOTKEYS, L"禁用快捷键");
     AppendMenuW(menu, MF_STRING | (settings_autostart_enabled() ? MF_CHECKED : 0),
-                MENU_AUTOSTART, L"开机自启");
+                MENU_AUTOSTART, L"开机时启动");
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(menu, MF_STRING, MENU_EXIT, L"退出程序");
     GetCursorPos(&cursor);
@@ -761,9 +788,19 @@ static void show_tray_menu(void)
     switch (choice) {
     case MENU_OPEN: ui_show(); break;
     case MENU_TOGGLE: actions.set_enabled(!keymap_is_latched()); break;
+    case MENU_DISABLE_HOTKEYS:
+        {
+            int enabled = !keymap_hotkeys_enabled();
+            if (!settings_save_hotkeys_enabled(enabled))
+                show_error(L"无法保存快捷键设置。");
+            else
+                keymap_set_hotkeys_enabled(enabled);
+            ui_refresh();
+            break;
+        }
     case MENU_AUTOSTART:
         if (!settings_set_autostart(!settings_autostart_enabled()))
-            show_error(L"无法保存开机自启设置。");
+            show_error(L"无法保存开机时启动设置。");
         ui_refresh();
         break;
     case MENU_EXIT: actions.quit(); break;
