@@ -75,6 +75,9 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
                         L"Offset Pad", MB_OK | MB_ICONERROR);
         ui_refresh();
         return 0;
+    case WM_OFFSET_PAD_MODE_REMINDER:
+        ui_show_mode_reminder();
+        return 0;
     case WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE:
         if (wparam == KEYMAP_CAPTURE_INVALID)
             MessageBoxW(window, L"该按键已用于数字映射，请选择其他快捷键。",
@@ -187,9 +190,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     if (settings_load_sources(sources))
         keymap_set_sources(sources);
     keymap_set_enabled(settings_load_enabled());
+    keymap_set_block_letters(settings_load_block_letters());
     keymap_set_hotkey(settings_load_hotkey());
     keymap_set_capture_message(WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE);
     keymap_set_source_capture_message(WM_OFFSET_PAD_SOURCE_CAPTURE_DONE);
+    keymap_set_reminder_message(WM_OFFSET_PAD_MODE_REMINDER);
     if (!ui_init(instance, main_window, light_icon, dark_icon,
                  tray_o_icon, tray_9_icon, &actions)) {
         exit_code = 1;

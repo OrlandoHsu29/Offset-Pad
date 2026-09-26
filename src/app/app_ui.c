@@ -14,6 +14,7 @@
 #define ID_AUTOSTART 102
 #define ID_CLOSE 103
 #define ID_HOTKEY 104
+#define ID_BLOCK_LETTERS 105
 #define MENU_OPEN 201
 #define MENU_TOGGLE 202
 #define MENU_AUTOSTART 203
@@ -27,6 +28,7 @@ static HWND message_window;
 static HWND settings_window;
 static HWND toggle_button;
 static HWND autostart_check;
+static HWND block_letters_check;
 static HWND hotkey_button;
 static HFONT title_font;
 static HFONT heading_font;
@@ -264,18 +266,20 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         return;
     }
 
-    if (item->CtlID == ID_AUTOSTART) {
-        int enabled = settings_autostart_enabled();
+    if (item->CtlID == ID_AUTOSTART || item->CtlID == ID_BLOCK_LETTERS) {
+        int enabled = item->CtlID == ID_AUTOSTART ?
+                      settings_autostart_enabled() : keymap_block_letters_enabled();
         RECT switch_rect = rect;
         RECT knob;
         fill = pressed ? COLOR_TINT : COLOR_WHITE;
         rounded_box(dc, rect, fill, focused ? COLOR_ACCENT : COLOR_BORDER, 12);
-        rect.left += scale(18);
-        rect.right -= scale(64);
-        draw_label(dc, L"开机时启动", rect, body_font,
-                   COLOR_INK, DT_SINGLELINE | DT_VCENTER);
-        switch_rect.left = switch_rect.right - scale(58);
-        switch_rect.right -= scale(16);
+        rect.left += scale(14);
+        rect.right -= scale(58);
+        draw_label(dc, item->CtlID == ID_AUTOSTART ? L"开机时启动" : L"屏蔽字母输入",
+                   rect, body_font, COLOR_INK,
+                   DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        switch_rect.left = switch_rect.right - scale(54);
+        switch_rect.right -= scale(12);
         switch_rect.top += scale(11);
         switch_rect.bottom -= scale(11);
         rounded_box(dc, switch_rect, enabled ? COLOR_ACCENT : COLOR_BORDER,
@@ -332,6 +336,26 @@ static void add_tray(void)
     }
 }
 
+void ui_show_mode_reminder(void)
+{
+    NOTIFYICONDATAW data = {0};
+    wchar_t shortcut[96];
+    if (!tray_added || !keymap_is_enabled())
+        return;
+    keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
+                         keymap_get_hotkey());
+    data.cbSize = sizeof(data);
+    data.hWnd = message_window;
+    data.uID = TRAY_ID;
+    data.uFlags = NIF_INFO | NIF_REALTIME;
+    data.dwInfoFlags = NIIF_INFO;
+    lstrcpynW(data.szInfoTitle, L"Offset Pad",
+              (int)(sizeof(data.szInfoTitle) / sizeof(data.szInfoTitle[0])));
+    swprintf(data.szInfo, sizeof(data.szInfo) / sizeof(data.szInfo[0]),
+             L"当前处于小键盘模式。按 %ls 切回普通键盘。", shortcut);
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
 void ui_refresh(void)
 {
     NOTIFYICONDATAW data = {0};
@@ -344,6 +368,8 @@ void ui_refresh(void)
         InvalidateRect(toggle_button, NULL, FALSE);
     if (autostart_check != NULL)
         InvalidateRect(autostart_check, NULL, FALSE);
+    if (block_letters_check != NULL)
+        InvalidateRect(block_letters_check, NULL, FALSE);
     if (hotkey_button != NULL)
         InvalidateRect(hotkey_button, NULL, FALSE);
     if (tray_added) {
@@ -366,9 +392,13 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                          scale(24), scale(353), scale(376), scale(46),
                                          window, (HMENU)(INT_PTR)ID_HOTKEY, instance, NULL);
+        block_letters_check = CreateWindowExW(0, L"BUTTON", L"屏蔽字母输入",
+                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                              scale(24), scale(409), scale(180), scale(46),
+                                              window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS, instance, NULL);
         autostart_check = CreateWindowExW(0, L"BUTTON", L"开机时启动",
                                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                           scale(24), scale(409), scale(376), scale(46),
+                                           scale(220), scale(409), scale(180), scale(46),
                                            window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
         toggle_button = CreateWindowExW(0, L"BUTTON", L"开启小键盘",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
@@ -389,7 +419,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             GetCursorPos(&point);
             ScreenToClient(window, &point);
             if (source_key_at(point) >= 0 ||
-                id == ID_HOTKEY || id == ID_AUTOSTART ||
+                id == ID_HOTKEY || id == ID_AUTOSTART || id == ID_BLOCK_LETTERS ||
                 id == ID_TOGGLE || id == ID_CLOSE)
                 SetCursor(LoadCursorW(NULL, IDC_HAND));
             else
@@ -452,6 +482,17 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             keymap_cancel_capture();
             actions.set_enabled(!keymap_is_enabled());
             return 0;
+        case ID_BLOCK_LETTERS:
+            {
+                int enabled = !keymap_block_letters_enabled();
+                keymap_cancel_capture();
+                if (!settings_save_block_letters(enabled))
+                    show_error(L"无法保存屏蔽字母输入设置。");
+                else
+                    keymap_set_block_letters(enabled);
+                ui_refresh();
+                return 0;
+            }
         case ID_AUTOSTART:
             keymap_cancel_capture();
             if (!settings_set_autostart(!settings_autostart_enabled()))
@@ -479,6 +520,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         settings_window = NULL;
         toggle_button = NULL;
         autostart_check = NULL;
+        block_letters_check = NULL;
         hotkey_button = NULL;
         return 0;
     }

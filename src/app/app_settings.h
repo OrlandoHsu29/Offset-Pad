@@ -5,6 +5,8 @@
 
 int settings_load_enabled(void);
 int settings_save_enabled(int enabled);
+int settings_load_block_letters(void);
+int settings_save_block_letters(int enabled);
 int settings_autostart_enabled(void);
 int settings_set_autostart(int enabled);
 keymap_hotkey settings_load_hotkey(void);

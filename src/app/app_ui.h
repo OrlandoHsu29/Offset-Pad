@@ -16,6 +16,7 @@ int ui_init(HINSTANCE instance, HWND message_window, HICON light_icon,
 void ui_shutdown(void);
 void ui_show(void);
 void ui_refresh(void);
+void ui_show_mode_reminder(void);
 void ui_tray_message(LPARAM message);
 void ui_taskbar_created(void);
 int ui_handle_dialog_message(MSG *message);
@@ -25,6 +26,7 @@ int ui_handle_dialog_message(MSG *message);
 #define WM_OFFSET_PAD_MODE_CHANGED (WM_APP + 3)
 #define WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE (WM_APP + 4)
 #define WM_OFFSET_PAD_SOURCE_CAPTURE_DONE (WM_APP + 5)
+#define WM_OFFSET_PAD_MODE_REMINDER (WM_APP + 6)
 #define OFFSET_PAD_MAIN_CLASS L"OffsetPadMessageWindow"
 
 #endif

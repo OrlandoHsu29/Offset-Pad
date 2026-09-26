@@ -4,14 +4,38 @@
 #include <stdio.h>
 
 /* Drive the low-level hook with physical-key event records without installing it. */
+#define TEST_REMINDER_MESSAGE (WM_APP + 6)
 static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size);
+static ULONGLONG WINAPI mock_get_tick_count64(void);
+static BOOL WINAPI mock_post_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 #define SendInput mock_send_input
+#define GetTickCount64 mock_get_tick_count64
+#define PostMessageW mock_post_message
 #include "../src/input/keymap.c"
+#undef PostMessageW
+#undef GetTickCount64
 #undef SendInput
 
 static INPUT sent_inputs[8];
 static size_t sent_count;
 static size_t send_calls;
+static ULONGLONG now_ms;
+static unsigned int reminder_posts;
+
+static ULONGLONG WINAPI mock_get_tick_count64(void)
+{
+    return now_ms;
+}
+
+static BOOL WINAPI mock_post_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    (void)window;
+    (void)wparam;
+    (void)lparam;
+    if (message == TEST_REMINDER_MESSAGE)
+        ++reminder_posts;
+    return TRUE;
+}
 
 static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
 {
@@ -25,11 +49,11 @@ static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
     return count;
 }
 
-static void key_event(DWORD key, WPARAM message)
+static LRESULT key_event(DWORD key, WPARAM message)
 {
     KBDLLHOOKSTRUCT event = {0};
     event.vkCode = key;
-    keyboard_proc(HC_ACTION, message, (LPARAM)&event);
+    return keyboard_proc(HC_ACTION, message, (LPARAM)&event);
 }
 
 static void modifier(DWORD key, int down)
@@ -192,6 +216,126 @@ int main(void)
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
     assert(sent_count == 4);
+
+    assert(!keymap_block_letters_enabled());
+    keymap_set_enabled(1);
+    assert(key_event('A', WM_KEYDOWN) != 1);
+    keymap_set_block_letters(1);
+    assert(keymap_block_letters_enabled());
+    assert(key_event('A', WM_KEYDOWN) != 1);
+    assert(key_event('A', WM_KEYUP) != 1);
+    assert(key_event('A', WM_KEYDOWN) == 1);
+    assert(key_event('A', WM_KEYDOWN) == 1);
+    keymap_set_enabled(0);
+    assert(key_event('A', WM_KEYUP) == 1);
+    assert(key_event('A', WM_KEYDOWN) != 1);
+    assert(key_event('A', WM_KEYUP) != 1);
+
+    keymap_set_enabled(1);
+    modifier(VK_LCONTROL, 1);
+    assert(key_event('C', WM_KEYDOWN) != 1);
+    assert(key_event('C', WM_KEYUP) != 1);
+    modifier(VK_LCONTROL, 0);
+    modifier(VK_LSHIFT, 1);
+    assert(key_event('A', WM_KEYDOWN) == 1);
+    assert(key_event('A', WM_KEYUP) == 1);
+    modifier(VK_LSHIFT, 0);
+
+    sent_count = 0;
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    keymap_begin_source_capture(6);
+    assert(key_event('B', WM_KEYDOWN) == 1);
+    assert(keymap_get_source(6) == 'B');
+    assert(key_event('B', WM_KEYUP) == 1);
+    assert(sent_count == 2);
+    assert(keymap_set_sources(defaults));
+
+    assert(key_event('A', WM_KEYDOWN) == 1);
+    keymap_set_block_letters(0);
+    assert(key_event('A', WM_KEYUP) == 1);
+    assert(key_event('A', WM_KEYDOWN) != 1);
+    assert(key_event('A', WM_KEYUP) != 1);
+    keymap_set_enabled(0);
+
+    notify_window = (HWND)1;
+    keymap_set_reminder_message(TEST_REMINDER_MESSAGE);
+    reminder_posts = 0;
+    now_ms = 90000;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 0);
+
+    keymap_set_enabled(1);
+    modifier(VK_LCONTROL, 1);
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    modifier(VK_LCONTROL, 0);
+    assert(reminder_posts == 0);
+
+    now_ms = 100000;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    now_ms = 101000;
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    now_ms = 101501;
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 0);
+
+    sent_count = 0;
+    now_ms = 104000;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    now_ms = 104500;
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    now_ms = 104700;
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(reminder_posts == 0 && sent_count == 2);
+    now_ms = 104900;
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 1);
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 1);
+
+    keymap_set_enabled(0);
+    keymap_set_enabled(1);
+    now_ms = 105000;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 1);
+    now_ms = 165000;
+    key_event('A', WM_KEYDOWN);
+    key_event('A', WM_KEYUP);
+    key_event('B', WM_KEYDOWN);
+    key_event('B', WM_KEYUP);
+    key_event('C', WM_KEYDOWN);
+    key_event('C', WM_KEYUP);
+    assert(reminder_posts == 2);
+    keymap_set_enabled(0);
 
     puts("keymap tests passed");
     return 0;

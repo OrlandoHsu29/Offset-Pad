@@ -4,6 +4,10 @@
 
 #include "keymap.h"
 
+#define REMINDER_PRESS_COUNT 3U
+#define REMINDER_WINDOW_MS 1500ULL
+#define REMINDER_COOLDOWN_MS 60000ULL
+
 typedef struct mapped_key {
     DWORD source;
     WORD target;
@@ -25,8 +29,17 @@ static HWND notify_window;
 static UINT changed_message;
 static UINT capture_message;
 static UINT source_capture_message;
+static UINT reminder_message;
+static ULONGLONG reminder_window_start;
+static ULONGLONG reminder_last_sent;
+static unsigned int reminder_press_count;
+static int reminder_ever_sent;
+static int reminder_sent_this_activation;
 static size_t source_capture_index = KEYMAP_KEY_COUNT;
 static int enabled;
+static int block_letters;
+static unsigned int blocked_letter_keys;
+static unsigned int passed_letter_keys;
 static unsigned char modifiers[8];
 static unsigned char captured_modifiers[8];
 static unsigned int capture_modifiers_seen;
@@ -51,6 +64,30 @@ static void clear_hotkey_block_if_released(void)
 {
     if (active_modifiers() == 0 && captured_key == 0)
         block_hotkey_until_clear = 0;
+}
+
+static void note_unmapped_letter_press(void)
+{
+    ULONGLONG now;
+    if (reminder_sent_this_activation || reminder_message == 0 || notify_window == NULL)
+        return;
+    now = GetTickCount64();
+    if (reminder_press_count == 0 || now - reminder_window_start > REMINDER_WINDOW_MS) {
+        reminder_window_start = now;
+        reminder_press_count = 1;
+    } else {
+        ++reminder_press_count;
+    }
+    if (reminder_press_count < REMINDER_PRESS_COUNT)
+        return;
+    reminder_press_count = 0;
+    if (reminder_ever_sent && now - reminder_last_sent < REMINDER_COOLDOWN_MS)
+        return;
+    if (PostMessageW(notify_window, reminder_message, 0, 0)) {
+        reminder_last_sent = now;
+        reminder_ever_sent = 1;
+        reminder_sent_this_activation = 1;
+    }
 }
 
 static void send_digit(WORD digit)
@@ -80,11 +117,23 @@ void keymap_set_enabled(int value)
         }
     }
     enabled = value;
+    reminder_press_count = 0;
+    reminder_sent_this_activation = 0;
 }
 
 int keymap_is_enabled(void)
 {
     return enabled;
+}
+
+void keymap_set_block_letters(int value)
+{
+    block_letters = value != 0;
+}
+
+int keymap_block_letters_enabled(void)
+{
+    return block_letters;
 }
 
 int keymap_source_supported(DWORD source)
@@ -291,6 +340,11 @@ void keymap_set_source_capture_message(UINT message)
     source_capture_message = message;
 }
 
+void keymap_set_reminder_message(UINT message)
+{
+    reminder_message = message;
+}
+
 int keymap_is_capturing(void)
 {
     return capturing;
@@ -471,6 +525,20 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         return CallNextHookEx(hook, code, message, parameter);
     }
 
+    if (event->vkCode >= 'A' && event->vkCode <= 'Z') {
+        unsigned int bit = 1U << (event->vkCode - 'A');
+        if (blocked_letter_keys & bit) {
+            if (released)
+                blocked_letter_keys &= ~bit;
+            return 1;
+        }
+        if (passed_letter_keys & bit) {
+            if (released)
+                passed_letter_keys &= ~bit;
+            return CallNextHookEx(hook, code, message, parameter);
+        }
+    }
+
     if (event->vkCode == captured_key && captured_key != 0) {
         if (released) {
             for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
@@ -546,6 +614,18 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
         }
         break;
+    }
+    if (!released && event->vkCode >= 'A' && event->vkCode <= 'Z') {
+        unsigned int bit = 1U << (event->vkCode - 'A');
+        if (enabled &&
+            !(active_modifiers() & (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_WIN))) {
+            note_unmapped_letter_press();
+            if (block_letters) {
+                blocked_letter_keys |= bit;
+                return 1;
+            }
+        }
+        passed_letter_keys |= bit;
     }
     return CallNextHookEx(hook, code, message, parameter);
 }
