@@ -11,9 +11,7 @@
 #include "keymap.h"
 
 #define TRAY_ID 1
-#define ID_TOGGLE 101
 #define ID_AUTOSTART 102
-#define ID_CLOSE 103
 #define ID_HOTKEY 104
 #define ID_BLOCK_LETTERS 105
 #define ID_HOLD_HOTKEY 106
@@ -21,6 +19,7 @@
 #define ID_BLOCK_LETTERS_CARD 108
 #define ID_AUTO_UPDATES 109
 #define ID_UPDATE_LINK 110
+#define ID_MODE_BADGE 111
 #define MENU_OPEN 201
 #define MENU_TOGGLE 202
 #define MENU_AUTOSTART 203
@@ -34,13 +33,13 @@ static const wchar_t settings_class[] = L"OffsetPadSettingsWindow";
 static HINSTANCE instance;
 static HWND message_window;
 static HWND settings_window;
-static HWND toggle_button;
 static HWND autostart_check;
 static HWND block_letters_check;
 static HWND hotkey_button;
 static HWND hold_hotkey_button;
 static HWND auto_updates_check;
 static HWND update_link_button;
+static HWND mode_badge_button;
 static int update_available;
 static int update_notice_active;
 static HFONT title_font;
@@ -70,7 +69,7 @@ typedef struct hover_button {
     int tracking_mouse_leave;
 } hover_button;
 
-static hover_button hover_buttons[8];
+static hover_button hover_buttons[7];
 
 static HICON current_icon(void)
 {
@@ -97,6 +96,7 @@ static HICON current_logo(void)
 #define COLOR_HOVER RGB(243, 243, 243)
 #define COLOR_ACCENT_HOVER RGB(58, 58, 58)
 #define COLOR_BORDER RGB(222, 222, 222)
+#define COLOR_MODE_BADGE_HOVER_BORDER RGB(190, 190, 190)
 #define COLOR_KEYCAP RGB(252, 252, 252)
 #define COLOR_KEYCAP_OUTPUT RGB(244, 244, 244)
 #define COLOR_KEYCAP_HOVER RGB(240, 240, 240)
@@ -278,7 +278,6 @@ static void paint_settings(HDC dc, const RECT *client)
     wchar_t shortcut[96];
     wchar_t hint[192];
     HBRUSH background = CreateSolidBrush(COLOR_WHITE);
-    COLORREF accent = keymap_is_enabled() ? COLOR_ACCENT : COLOR_MUTED;
     COLORREF hint_color = hotkey_capture_status[0] != L'\0' ? RGB(180, 82, 82) : COLOR_MUTED;
     FillRect(dc, client, background);
     DeleteObject(background);
@@ -320,12 +319,7 @@ static void paint_settings(HDC dc, const RECT *client)
     rect = scaled_rect(43, 131, 386, 150);
     draw_label(dc, hint, rect, small_font,
                hint_color, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-    rect = scaled_rect(341, 112, 381, 137);
-    rounded_box(dc, rect, keymap_is_enabled() ? COLOR_ACCENT : COLOR_WHITE,
-                keymap_is_enabled() ? COLOR_ACCENT : COLOR_BORDER, 12);
-    draw_label(dc, keymap_is_enabled() ? L"ON" : L"OFF", rect, small_font,
-               keymap_is_enabled() ? COLOR_WHITE : accent,
-               DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+
 
     rect = scaled_rect(24, 179, 250, 205);
     draw_label(dc, L"按键映射", rect, heading_font, COLOR_INK,
@@ -380,10 +374,10 @@ static void paint_settings(HDC dc, const RECT *client)
                        DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
     }
-    rect = scaled_rect(185, 514, 400, 533);
-    draw_label(dc, L"关闭窗口后继续在托盘运行", rect, small_font, COLOR_MUTED,
+    rect = scaled_rect(185, 469, 400, 488);
+    draw_label(dc, L"关闭窗口后会继续在托盘运行", rect, small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_RIGHT | DT_VCENTER);
-    draw_label(dc, L"自动检查更新", scaled_rect(46, 514, 155, 533), small_font, COLOR_MUTED,
+    draw_label(dc, L"自动检查更新", scaled_rect(46, 469, 155, 488), small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_LEFT | DT_VCENTER);
 
 }
@@ -417,7 +411,6 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
     COLORREF fill = COLOR_WHITE;
     COLORREF border = COLOR_BORDER;
     COLORREF ink = COLOR_INK;
-    const wchar_t *label;
 
     if (item->CtlID == ID_HOTKEY || item->CtlID == ID_HOLD_HOTKEY) {
         wchar_t shortcut[96];
@@ -570,18 +563,23 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         rounded_box(dc, knob, COLOR_WHITE, COLOR_WHITE, 17);
         return;
     }
-    if (item->CtlID == ID_TOGGLE) {
-        fill = pressed ? COLOR_ACCENT_DOWN : (hovered ? COLOR_ACCENT_HOVER : COLOR_ACCENT);
-        border = fill;
-        ink = COLOR_WHITE;
-        label = keymap_is_latched() ? L"关闭小键盘" : L"开启小键盘";
-    } else {
-        fill = pressed ? COLOR_KEYCAP_HOVER : (hovered ? COLOR_TINT : COLOR_WHITE);
-        label = L"关闭";
+    if (item->CtlID == ID_MODE_BADGE) {
+        int enabled = keymap_is_enabled();
+        const wchar_t *label = enabled ? L"ON" : L"OFF";
+        if (enabled) {
+            fill = pressed ? COLOR_ACCENT_DOWN :
+                   (hovered ? COLOR_ACCENT_HOVER : COLOR_ACCENT);
+            border = fill;
+            ink = COLOR_WHITE;
+        } else {
+            fill = pressed ? COLOR_TINT : (hovered ? COLOR_HOVER : COLOR_WHITE);
+            border = hovered || pressed ? COLOR_MODE_BADGE_HOVER_BORDER : COLOR_BORDER;
+            ink = COLOR_ACCENT;
+        }
+        rounded_box(dc, rect, fill, border, 12);
+        draw_label(dc, label, rect, small_font, ink,
+                   DT_SINGLELINE | DT_CENTER | DT_VCENTER);
     }
-    rounded_box(dc, rect, fill, border, 11);
-    draw_label(dc, label, rect, body_font, ink,
-               DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
 static void draw_button(const DRAWITEMSTRUCT *item)
@@ -593,6 +591,7 @@ static void draw_button(const DRAWITEMSTRUCT *item)
     HDC buffer_dc;
     HBITMAP buffer_bitmap;
     HGDIOBJ previous_bitmap;
+    HBRUSH background_brush;
     RECT buffer_rect;
 
     if (width <= 0 || height <= 0) {
@@ -617,8 +616,13 @@ static void draw_button(const DRAWITEMSTRUCT *item)
     buffer_rect.top = 0;
     buffer_rect.right = width;
     buffer_rect.bottom = height;
+    background_brush = CreateSolidBrush(item->CtlID == ID_MODE_BADGE ?
+                                       COLOR_TINT : COLOR_WHITE);
     FillRect(buffer_dc, &buffer_rect,
+             background_brush != NULL ? background_brush :
              (HBRUSH)GetStockObject(WHITE_BRUSH));
+    if (background_brush != NULL)
+        DeleteObject(background_brush);
     buffered_item.hDC = buffer_dc;
     buffered_item.rcItem = buffer_rect;
     draw_button_content(&buffered_item);
@@ -733,8 +737,10 @@ void ui_refresh(void)
         SendMessageW(settings_window, WM_SETICON, ICON_SMALL, (LPARAM)current_icon());
         SendMessageW(settings_window, WM_SETICON, ICON_BIG, (LPARAM)current_logo());
     }
-    if (toggle_button != NULL)
-        InvalidateRect(toggle_button, NULL, FALSE);
+    if (mode_badge_button != NULL) {
+        SetWindowTextW(mode_badge_button, keymap_is_enabled() ? L"ON" : L"OFF");
+        InvalidateRect(mode_badge_button, NULL, FALSE);
+    }
     if (autostart_check != NULL)
         InvalidateRect(autostart_check, NULL, FALSE);
     if (block_letters_check != NULL)
@@ -779,14 +785,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                                            WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
                                            scale(232), scale(409), scale(168), scale(46),
                                            window, (HMENU)(INT_PTR)ID_AUTOSTART_CARD, instance, NULL);
-        toggle_button = CreateWindowExW(0, L"BUTTON", L"开启小键盘",
-                                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                         scale(24), scale(467), scale(180), scale(39),
-                                         window, (HMENU)(INT_PTR)ID_TOGGLE, instance, NULL);
-        CreateWindowExW(0, L"BUTTON", L"关闭",
-                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(220), scale(467), scale(180), scale(39),
-                        window, (HMENU)(INT_PTR)ID_CLOSE, instance, NULL);
+
         block_letters_check = CreateWindowExW(0, L"BUTTON", L"",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                         scale(166), scale(420), scale(42), scale(24),
@@ -797,21 +796,24 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                         window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
         auto_updates_check = CreateWindowExW(0, L"BUTTON", L"",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(24), scale(515), scale(16), scale(16),
+                        scale(24), scale(470), scale(16), scale(16),
                         window, (HMENU)(INT_PTR)ID_AUTO_UPDATES, instance, NULL);
         update_link_button = CreateWindowExW(0, L"BUTTON", L"有可用更新，点击查看",
                         WS_CHILD | WS_TABSTOP | BS_OWNERDRAW |
                         (update_available ? WS_VISIBLE : 0),
                         header_update_button_left(), scale(23), scale(24), scale(24),
                         window, (HMENU)(INT_PTR)ID_UPDATE_LINK, instance, NULL);
+        mode_badge_button = CreateWindowExW(0, L"BUTTON", keymap_is_enabled() ? L"ON" : L"OFF",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                        scale(341), scale(112), scale(40), scale(25),
+                        window, (HMENU)(INT_PTR)ID_MODE_BADGE, instance, NULL);
         attach_hover_tracking(GetDlgItem(window, ID_HOTKEY), ID_HOTKEY);
         attach_hover_tracking(GetDlgItem(window, ID_HOLD_HOTKEY), ID_HOLD_HOTKEY);
         attach_hover_tracking(GetDlgItem(window, ID_BLOCK_LETTERS), ID_BLOCK_LETTERS);
         attach_hover_tracking(GetDlgItem(window, ID_AUTOSTART), ID_AUTOSTART);
-        attach_hover_tracking(GetDlgItem(window, ID_TOGGLE), ID_TOGGLE);
-        attach_hover_tracking(GetDlgItem(window, ID_CLOSE), ID_CLOSE);
         attach_hover_tracking(GetDlgItem(window, ID_AUTO_UPDATES), ID_AUTO_UPDATES);
         attach_hover_tracking(GetDlgItem(window, ID_UPDATE_LINK), ID_UPDATE_LINK);
+        attach_hover_tracking(GetDlgItem(window, ID_MODE_BADGE), ID_MODE_BADGE);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -826,7 +828,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 id == ID_HOTKEY || id == ID_HOLD_HOTKEY ||
                 id == ID_AUTOSTART || id == ID_BLOCK_LETTERS ||
                 id == ID_AUTO_UPDATES || id == ID_UPDATE_LINK ||
-                id == ID_TOGGLE || id == ID_CLOSE)
+                id == ID_MODE_BADGE)
                 SetCursor(LoadCursorW(NULL, IDC_HAND));
             else
                 SetCursor(LoadCursorW(NULL, IDC_ARROW));
@@ -923,9 +925,9 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             }
             ui_refresh();
             return 0;
-        case ID_TOGGLE:
+        case ID_MODE_BADGE:
             keymap_cancel_capture();
-            actions.set_enabled(!keymap_is_latched());
+            actions.set_enabled(!keymap_is_enabled());
             return 0;
         case ID_BLOCK_LETTERS:
             {
@@ -955,9 +957,6 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 show_error(L"无法保存自动检查更新设置。");
             ui_refresh();
             return 0;
-        case ID_CLOSE:
-            PostMessageW(window, WM_CLOSE, 0, 0);
-            return 0;
         }
         break;
     case WM_CLOSE:
@@ -975,13 +974,13 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         return 0;
     case WM_DESTROY:
         settings_window = NULL;
-        toggle_button = NULL;
         autostart_check = NULL;
         block_letters_check = NULL;
         hotkey_button = NULL;
         hold_hotkey_button = NULL;
         auto_updates_check = NULL;
         update_link_button = NULL;
+        mode_badge_button = NULL;
         hovered_source_key = -1;
         mouse_leave_tracking = 0;
         hovered_button_id = 0;
@@ -1089,7 +1088,7 @@ void ui_show(void)
             compact_font = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        rect = scaled_rect(0, 0, 424, 542);
+        rect = scaled_rect(0, 0, 424, 500);
         AdjustWindowRect(&rect, style, FALSE);
         width = rect.right - rect.left;
         height = rect.bottom - rect.top;
