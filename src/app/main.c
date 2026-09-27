@@ -67,8 +67,6 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_show();
         return 0;
     case WM_OFFSET_PAD_MODE_CHANGED:
-        ui_refresh();
-        return 0;
     case WM_OFFSET_PAD_EFFECTIVE_CHANGED:
         ui_refresh();
         return 0;

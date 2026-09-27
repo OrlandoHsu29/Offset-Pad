@@ -31,6 +31,13 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/input tests\keymap_test.c 
 .\build\keymap_test.exe
 ```
 
+注册表配置读写测试使用模拟 API，不会访问当前用户的真实注册表：
+
+```powershell
+gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/app -Isrc/input tests\app_settings_test.c -o build\app_settings_test.exe -ladvapi32
+.\build\app_settings_test.exe
+```
+
 ## 项目结构
 
 | 路径 | 职责 |

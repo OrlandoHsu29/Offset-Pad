@@ -41,7 +41,7 @@ static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
 {
     UINT index;
     assert(size == sizeof(INPUT));
-    assert(count == 2);
+    assert(count > 0);
     ++send_calls;
     assert(sent_count + count <= sizeof(sent_inputs) / sizeof(sent_inputs[0]));
     for (index = 0; index < count; ++index)
@@ -126,6 +126,16 @@ int main(void)
     assert(keymap_get_hotkey().modifiers == value.modifiers);
     keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]), value);
     assert(wcscmp(name, L"Ctrl + Alt + Shift") == 0);
+
+    keymap_begin_capture();
+    keymap_begin_source_capture(6);
+    assert(keymap_is_source_capturing() && !keymap_is_capturing());
+    keymap_begin_hold_capture();
+    assert(keymap_is_hold_capturing() && !keymap_is_source_capturing());
+    keymap_cancel_capture();
+    assert(!keymap_is_capturing() && !keymap_is_hold_capturing() &&
+           !keymap_is_source_capturing() &&
+           keymap_capturing_source() == KEYMAP_KEY_COUNT);
 
     keymap_get_sources(defaults);
     assert(defaults[6] == 'N' && defaults[9] == VK_SPACE);

@@ -16,6 +16,13 @@ typedef struct mapped_key {
     DWORD swallow_source;
 } mapped_key;
 
+typedef enum capture_mode {
+    CAPTURE_NONE,
+    CAPTURE_TOGGLE_HOTKEY,
+    CAPTURE_HOLD_HOTKEY,
+    CAPTURE_SOURCE_KEY
+} capture_mode;
+
 static mapped_key keys[KEYMAP_KEY_COUNT] = {
     {'U', L'7', 0, 0, 0}, {'I', L'8', 0, 0, 0},
     {'O', L'9', 0, 0, 0}, {'J', L'4', 0, 0, 0},
@@ -48,7 +55,7 @@ static unsigned char modifiers[8];
 static unsigned char captured_modifiers[8];
 static unsigned int capture_modifiers_seen;
 static DWORD captured_key;
-static int capturing;
+static capture_mode capture;
 static int block_hotkey_until_clear;
 static int hotkey_key_down;
 static int chord_down;
@@ -390,14 +397,9 @@ int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
             if (sources[index] == sources[other])
                 return 0;
     }
-    for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
-        if (keys[index].down) {
-            keys[index].down = 0;
-            keys[index].swallow_up = 1;
-            keys[index].swallow_source = keys[index].source;
-        }
+    release_mapped_keys();
+    for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
         keys[index].source = sources[index];
-    }
     return 1;
 }
 
@@ -553,19 +555,24 @@ void keymap_set_reminder_message(UINT message)
     reminder_message = message;
 }
 
+static int hotkey_capture_active(void)
+{
+    return capture == CAPTURE_TOGGLE_HOTKEY || capture == CAPTURE_HOLD_HOTKEY;
+}
+
 int keymap_is_capturing(void)
 {
-    return capturing == 1;
+    return capture == CAPTURE_TOGGLE_HOTKEY;
 }
 
 int keymap_is_hold_capturing(void)
 {
-    return capturing == 2;
+    return capture == CAPTURE_HOLD_HOTKEY;
 }
 
 int keymap_is_source_capturing(void)
 {
-    return source_capture_index < KEYMAP_KEY_COUNT;
+    return capture == CAPTURE_SOURCE_KEY;
 }
 
 size_t keymap_capturing_source(void)
@@ -585,74 +592,63 @@ static void release_mapped_keys(void)
     }
 }
 
-void keymap_begin_capture(void)
+static void begin_capture(capture_mode mode, size_t source_index)
 {
-    if (capturing || keymap_is_source_capturing())
+    if (capture != CAPTURE_NONE)
         keymap_cancel_capture();
     release_mapped_keys();
     set_hold_active(0);
     hold_key_down = 0;
-    capturing = 1;
+    capture = mode;
+    source_capture_index = source_index;
     capture_modifiers_seen = 0;
     block_hotkey_until_clear = 1;
+}
+
+void keymap_begin_capture(void)
+{
+    begin_capture(CAPTURE_TOGGLE_HOTKEY, KEYMAP_KEY_COUNT);
 }
 
 void keymap_begin_hold_capture(void)
 {
-    if (capturing || keymap_is_source_capturing())
-        keymap_cancel_capture();
-    release_mapped_keys();
-    set_hold_active(0);
-    hold_key_down = 0;
-    capturing = 2;
-    capture_modifiers_seen = 0;
-    block_hotkey_until_clear = 1;
+    begin_capture(CAPTURE_HOLD_HOTKEY, KEYMAP_KEY_COUNT);
 }
 
 void keymap_begin_source_capture(size_t index)
 {
-    if (index >= KEYMAP_KEY_COUNT)
-        return;
-    if (capturing || keymap_is_source_capturing())
-        keymap_cancel_capture();
-    release_mapped_keys();
-    set_hold_active(0);
-    hold_key_down = 0;
-    source_capture_index = index;
-    capture_modifiers_seen = 0;
-    block_hotkey_until_clear = 1;
+    if (index < KEYMAP_KEY_COUNT)
+        begin_capture(CAPTURE_SOURCE_KEY, index);
 }
 
 void keymap_cancel_capture(void)
 {
-    int was_hotkey = capturing == 1;
-    int was_hold = capturing == 2;
-    int was_source = keymap_is_source_capturing();
-    if (!was_hotkey && !was_hold && !was_source)
+    capture_mode previous = capture;
+    if (previous == CAPTURE_NONE)
         return;
-    capturing = 0;
+    capture = CAPTURE_NONE;
     source_capture_index = KEYMAP_KEY_COUNT;
     capture_modifiers_seen = 0;
     block_hotkey_until_clear = 1;
     clear_hotkey_block_if_released();
-    if (was_hotkey && capture_message != 0)
+    if (previous == CAPTURE_TOGGLE_HOTKEY && capture_message != 0)
         PostMessageW(notify_window, capture_message, KEYMAP_CAPTURE_CANCELED, 0);
-    if (was_hold && hold_capture_message != 0)
+    if (previous == CAPTURE_HOLD_HOTKEY && hold_capture_message != 0)
         PostMessageW(notify_window, hold_capture_message, KEYMAP_CAPTURE_CANCELED, 0);
-    if (was_source && source_capture_message != 0)
+    if (previous == CAPTURE_SOURCE_KEY && source_capture_message != 0)
         PostMessageW(notify_window, source_capture_message, KEYMAP_CAPTURE_CANCELED, 0);
 }
 
 static void finish_capture(keymap_hotkey value)
 {
-    int is_hold = capturing == 2;
+    int is_hold = capture == CAPTURE_HOLD_HOTKEY;
     int empty = value.modifiers == 0 && value.key == 0;
     int conflict = !empty &&
                    (!hotkey_valid(value) ||
                     (is_hold ? same_hotkey(value, hotkey) :
                      same_hotkey(value, hold_hotkey)));
     UINT message = is_hold ? hold_capture_message : capture_message;
-    capturing = 0;
+    capture = CAPTURE_NONE;
     capture_modifiers_seen = 0;
     if (!conflict) {
         if (is_hold)
@@ -673,6 +669,7 @@ static void finish_source_capture(DWORD source)
                 !(hotkey.modifiers == 0 && hotkey.key == source) &&
                 !(hold_hotkey.modifiers == 0 && hold_hotkey.key == source);
     size_t index = source_capture_index;
+    capture = CAPTURE_NONE;
     source_capture_index = KEYMAP_KEY_COUNT;
     if (valid)
         set_source(index, source);
@@ -724,7 +721,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         was_hold_suspended = hold_modifiers_suspended;
         modifiers[modifier] = !released;
         mask = active_modifiers();
-        if (capturing) {
+        if (hotkey_capture_active()) {
             if (!released) {
                 capture_modifiers_seen |= mask;
                 captured_modifiers[modifier] = 1;
@@ -821,7 +818,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
         return 1;
     }
-    if (capturing) {
+    if (hotkey_capture_active()) {
         if (!released) {
             keymap_hotkey captured = {active_modifiers(), event->vkCode};
             captured_key = event->vkCode;
@@ -934,7 +931,7 @@ int keymap_install(HINSTANCE instance, HWND window, UINT message)
 
 void keymap_uninstall(void)
 {
-    capturing = 0;
+    capture = CAPTURE_NONE;
     source_capture_index = KEYMAP_KEY_COUNT;
     if (backspace_synthetic_down) {
         send_backspace_event(1);
