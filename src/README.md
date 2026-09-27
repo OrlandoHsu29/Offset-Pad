@@ -52,7 +52,7 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/app -Isrc/input tests\app_
 
 ## 设置与资源
 
-两个快捷键、快捷键启用状态、自定义键位和“屏蔽字母防误触”开关保存在 `HKCU\Software\Offset Pad`；先前保存的 11 键位设置会保留前 10 个数字映射；开机时启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
+两个快捷键、快捷键启用状态、自定义键位和“屏蔽字母防误触”开关保存在 `HKCU\Software\Offset Pad`；新录入的快捷键分别保存左右 Ctrl、Alt、Shift、Win，旧版保存的通用修饰键仍兼容任意一侧；先前保存的 11 键位设置会保留前 10 个数字映射；开机时启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
 
 “屏蔽字母防误触”新安装默认开启；已保存的开关值不变。“按下切换模式”快捷键默认为 Shift + 空格，“按住输入”快捷键默认为 Shift + Caps Lock，松开后恢复原先锁定的模式；它不会改写持久化的模式开关。程序对 Caps Lock 做了专门适配：Caps Lock 先按下时 Windows 会先切换大小写；若在松开 Caps Lock 前再按 Shift，会触发按住输入，并恢复按下 Caps Lock 前的大小写锁定状态。Shift + 空格与 Shift + Caps Lock 是推荐组合。程序每次启动均从普通键盘模式开始，模式状态只在本次运行中有效。录入任一快捷键时按 Delete 或 Backspace 可清除绑定；托盘菜单的“禁用快捷键”选项会同时停用两种快捷键，不影响界面按钮操作。
 

@@ -210,11 +210,12 @@ int main(void)
     assert(hotkey.modifiers == (KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN));
     assert(hotkey.key == 'K');
 
-    hotkey.modifiers = KEYMAP_MOD_ALT;
+    hotkey.modifiers = KEYMAP_MOD_RALT | KEYMAP_MOD_LSHIFT;
     hotkey.key = VK_F12;
     assert(settings_save_hold_hotkey(hotkey));
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == KEYMAP_MOD_ALT && hotkey.key == VK_F12);
+    assert(hotkey.modifiers == (KEYMAP_MOD_RALT | KEYMAP_MOD_LSHIFT) &&
+           hotkey.key == VK_F12);
     assert(settings_save_hold_hotkey((keymap_hotkey){0, 0}));
     hotkey = settings_load_hold_hotkey();
     assert(hotkey.modifiers == 0 && hotkey.key == 0);

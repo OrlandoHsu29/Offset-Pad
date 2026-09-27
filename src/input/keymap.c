@@ -94,12 +94,99 @@ static void release_mapped_keys(void);
 static unsigned int active_modifiers(void)
 {
     unsigned int mask = 0;
-    if (modifiers[0] || modifiers[1]) mask |= KEYMAP_MOD_CTRL;
-    if (modifiers[2] || modifiers[3]) mask |= KEYMAP_MOD_ALT;
-    if (modifiers[4] || modifiers[5]) mask |= KEYMAP_MOD_SHIFT;
-    if (modifiers[6] || modifiers[7]) mask |= KEYMAP_MOD_WIN;
+    if (modifiers[0]) mask |= KEYMAP_MOD_LCTRL;
+    if (modifiers[1]) mask |= KEYMAP_MOD_RCTRL;
+    if (modifiers[2]) mask |= KEYMAP_MOD_LALT;
+    if (modifiers[3]) mask |= KEYMAP_MOD_RALT;
+    if (modifiers[4]) mask |= KEYMAP_MOD_LSHIFT;
+    if (modifiers[5]) mask |= KEYMAP_MOD_RSHIFT;
+    if (modifiers[6]) mask |= KEYMAP_MOD_LWIN;
+    if (modifiers[7]) mask |= KEYMAP_MOD_RWIN;
     if (modifiers[8]) mask |= KEYMAP_MOD_CAPS;
     return mask;
+}
+
+static int modifier_encoding_valid(unsigned int value)
+{
+    return !((value & KEYMAP_MOD_CTRL) && (value & KEYMAP_MOD_CTRL_SIDES)) &&
+           !((value & KEYMAP_MOD_ALT) && (value & KEYMAP_MOD_ALT_SIDES)) &&
+           !((value & KEYMAP_MOD_SHIFT) && (value & KEYMAP_MOD_SHIFT_SIDES)) &&
+           !((value & KEYMAP_MOD_WIN) && (value & KEYMAP_MOD_WIN_SIDES));
+}
+
+static int modifier_family_equal(unsigned int active, unsigned int required,
+                                 unsigned int generic, unsigned int sides)
+{
+    unsigned int active_sides = active & sides;
+    if (required & generic)
+        return active_sides != 0;
+    return active_sides == (required & sides);
+}
+
+static int modifiers_equal(unsigned int active, unsigned int required)
+{
+    return modifier_family_equal(active, required, KEYMAP_MOD_CTRL, KEYMAP_MOD_CTRL_SIDES) &&
+           modifier_family_equal(active, required, KEYMAP_MOD_ALT, KEYMAP_MOD_ALT_SIDES) &&
+           modifier_family_equal(active, required, KEYMAP_MOD_SHIFT, KEYMAP_MOD_SHIFT_SIDES) &&
+           modifier_family_equal(active, required, KEYMAP_MOD_WIN, KEYMAP_MOD_WIN_SIDES) &&
+           ((active & KEYMAP_MOD_CAPS) != 0) == ((required & KEYMAP_MOD_CAPS) != 0);
+}
+
+static int modifier_family_contains(unsigned int active, unsigned int required,
+                                    unsigned int generic, unsigned int sides)
+{
+    if (required & generic)
+        return (active & sides) != 0;
+    return (active & (required & sides)) == (required & sides);
+}
+
+static int modifiers_contain(unsigned int active, unsigned int required)
+{
+    return modifier_family_contains(active, required, KEYMAP_MOD_CTRL, KEYMAP_MOD_CTRL_SIDES) &&
+           modifier_family_contains(active, required, KEYMAP_MOD_ALT, KEYMAP_MOD_ALT_SIDES) &&
+           modifier_family_contains(active, required, KEYMAP_MOD_SHIFT, KEYMAP_MOD_SHIFT_SIDES) &&
+           modifier_family_contains(active, required, KEYMAP_MOD_WIN, KEYMAP_MOD_WIN_SIDES) &&
+           (!(required & KEYMAP_MOD_CAPS) || (active & KEYMAP_MOD_CAPS));
+}
+
+static int modifier_family_can_extend(unsigned int active, unsigned int required,
+                                      unsigned int generic, unsigned int sides)
+{
+    if (required & generic)
+        return 1;
+    return ((active & sides) & ~(required & sides)) == 0;
+}
+
+static int modifiers_can_extend(unsigned int active, unsigned int required)
+{
+    return modifier_family_can_extend(active, required, KEYMAP_MOD_CTRL, KEYMAP_MOD_CTRL_SIDES) &&
+           modifier_family_can_extend(active, required, KEYMAP_MOD_ALT, KEYMAP_MOD_ALT_SIDES) &&
+           modifier_family_can_extend(active, required, KEYMAP_MOD_SHIFT, KEYMAP_MOD_SHIFT_SIDES) &&
+           modifier_family_can_extend(active, required, KEYMAP_MOD_WIN, KEYMAP_MOD_WIN_SIDES) &&
+           (!(active & KEYMAP_MOD_CAPS) || (required & KEYMAP_MOD_CAPS));
+}
+
+static int modifier_family_overlaps(unsigned int left, unsigned int right,
+                                    unsigned int generic, unsigned int sides)
+{
+    unsigned int left_sides = left & sides;
+    unsigned int right_sides = right & sides;
+    int left_set = (left & generic) != 0 || left_sides != 0;
+    int right_set = (right & generic) != 0 || right_sides != 0;
+    if (!left_set || !right_set)
+        return left_set == right_set;
+    if ((left & generic) || (right & generic))
+        return 1;
+    return left_sides == right_sides;
+}
+
+static int modifier_requirements_overlap(unsigned int left, unsigned int right)
+{
+    return modifier_family_overlaps(left, right, KEYMAP_MOD_CTRL, KEYMAP_MOD_CTRL_SIDES) &&
+           modifier_family_overlaps(left, right, KEYMAP_MOD_ALT, KEYMAP_MOD_ALT_SIDES) &&
+           modifier_family_overlaps(left, right, KEYMAP_MOD_SHIFT, KEYMAP_MOD_SHIFT_SIDES) &&
+           modifier_family_overlaps(left, right, KEYMAP_MOD_WIN, KEYMAP_MOD_WIN_SIDES) &&
+           ((left & KEYMAP_MOD_CAPS) != 0) == ((right & KEYMAP_MOD_CAPS) != 0);
 }
 
 static void clear_hotkey_block_if_released(void)
@@ -403,12 +490,12 @@ static void clear_hold_provisional(void)
     hold_provisional_was_latched = 0;
 }
 
-static int hold_hotkey_is_toggle_prefix(void)
+static int hold_hotkey_is_toggle_prefix(unsigned int active)
 {
     return hold_hotkey.key == 0 && hotkey.key == 0 &&
            hold_hotkey.modifiers != 0 &&
-           hold_hotkey.modifiers != hotkey.modifiers &&
-           (hotkey.modifiers & hold_hotkey.modifiers) == hold_hotkey.modifiers;
+           !modifiers_equal(active, hotkey.modifiers) &&
+           modifiers_can_extend(active, hotkey.modifiers);
 }
 
 static void confirm_hold_provisional(void)
@@ -598,18 +685,25 @@ static int source_in_use(DWORD source)
 
 static unsigned int hotkey_key_count(keymap_hotkey value)
 {
-    return ((value.modifiers & KEYMAP_MOD_CTRL) != 0) +
-           ((value.modifiers & KEYMAP_MOD_ALT) != 0) +
-           ((value.modifiers & KEYMAP_MOD_SHIFT) != 0) +
-           ((value.modifiers & KEYMAP_MOD_WIN) != 0) +
-           ((value.modifiers & KEYMAP_MOD_CAPS) != 0) +
-           (value.key != 0);
+    unsigned int count = value.key != 0;
+    unsigned int modifiers_left = value.modifiers;
+    while (modifiers_left != 0) {
+        count += modifiers_left & 1U;
+        modifiers_left >>= 1;
+    }
+    return count;
+}
+
+static int only_modifier_families(unsigned int value, unsigned int allowed)
+{
+    return value != 0 && (value & ~allowed) == 0;
 }
 
 static int validate_hotkey(keymap_hotkey value)
 {
     unsigned int key_count;
-    if ((value.modifiers & ~KEYMAP_MOD_ALL) != 0 || value.key > 255)
+    if ((value.modifiers & ~KEYMAP_MOD_ALL) != 0 || value.key > 255 ||
+        !modifier_encoding_valid(value.modifiers))
         return KEYMAP_CAPTURE_INVALID;
     key_count = hotkey_key_count(value);
     if (key_count < 2 || key_count > 4 ||
@@ -622,9 +716,13 @@ static int validate_hotkey(keymap_hotkey value)
         (value.modifiers == 0 && source_in_use(value.key)))
         return key_count < 2 || key_count > 4 ?
                KEYMAP_CAPTURE_INVALID_COUNT : KEYMAP_CAPTURE_INVALID;
-    if ((value.modifiers == KEYMAP_MOD_ALT && value.key != 0) ||
-        (value.modifiers == (KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT) &&
-         value.key == 0))
+    if ((value.key != 0 &&
+         only_modifier_families(value.modifiers, KEYMAP_MOD_ALT_ANY)) ||
+        (value.key == 0 &&
+         only_modifier_families(value.modifiers,
+                                KEYMAP_MOD_ALT_ANY | KEYMAP_MOD_SHIFT_ANY) &&
+         (value.modifiers & KEYMAP_MOD_ALT_ANY) != 0 &&
+         (value.modifiers & KEYMAP_MOD_SHIFT_ANY) != 0))
         return KEYMAP_CAPTURE_INVALID_ALT;
     return KEYMAP_CAPTURE_SAVED;
 }
@@ -636,7 +734,8 @@ static int hotkey_valid(keymap_hotkey value)
 
 static int same_hotkey(keymap_hotkey left, keymap_hotkey right)
 {
-    return left.modifiers == right.modifiers && left.key == right.key;
+    return left.key == right.key &&
+           modifier_requirements_overlap(left.modifiers, right.modifiers);
 }
 
 void keymap_set_hotkey(keymap_hotkey value)
@@ -716,9 +815,17 @@ void keymap_format_hotkey(wchar_t *buffer, size_t capacity, keymap_hotkey value)
     buffer[0] = L'\0';
     if (value.modifiers & KEYMAP_MOD_CAPS) append_hotkey_part(buffer, capacity, L"Caps");
     if (value.modifiers & KEYMAP_MOD_CTRL) append_hotkey_part(buffer, capacity, L"Ctrl");
+    if (value.modifiers & KEYMAP_MOD_LCTRL) append_hotkey_part(buffer, capacity, L"LCtrl");
+    if (value.modifiers & KEYMAP_MOD_RCTRL) append_hotkey_part(buffer, capacity, L"RCtrl");
     if (value.modifiers & KEYMAP_MOD_ALT) append_hotkey_part(buffer, capacity, L"Alt");
+    if (value.modifiers & KEYMAP_MOD_LALT) append_hotkey_part(buffer, capacity, L"LAlt");
+    if (value.modifiers & KEYMAP_MOD_RALT) append_hotkey_part(buffer, capacity, L"RAlt");
     if (value.modifiers & KEYMAP_MOD_SHIFT) append_hotkey_part(buffer, capacity, L"Shift");
+    if (value.modifiers & KEYMAP_MOD_LSHIFT) append_hotkey_part(buffer, capacity, L"LShift");
+    if (value.modifiers & KEYMAP_MOD_RSHIFT) append_hotkey_part(buffer, capacity, L"RShift");
     if (value.modifiers & KEYMAP_MOD_WIN) append_hotkey_part(buffer, capacity, L"Win");
+    if (value.modifiers & KEYMAP_MOD_LWIN) append_hotkey_part(buffer, capacity, L"LWin");
+    if (value.modifiers & KEYMAP_MOD_RWIN) append_hotkey_part(buffer, capacity, L"RWin");
     if (value.key == 0)
         return;
     if ((value.key >= 'A' && value.key <= 'Z') ||
@@ -728,7 +835,7 @@ void keymap_format_hotkey(wchar_t *buffer, size_t capacity, keymap_hotkey value)
     } else if (value.key >= VK_F1 && value.key <= VK_F24) {
         swprintf(name, sizeof(name) / sizeof(name[0]), L"F%u", value.key - VK_F1 + 1);
     } else if (value.key == VK_SPACE) {
-        lstrcpynW(name, L"空格", (int)(sizeof(name) / sizeof(name[0])));
+        lstrcpynW(name, L"Space", (int)(sizeof(name) / sizeof(name[0])));
     } else if (value.key == VK_OEM_COMMA) {
         lstrcpynW(name, L",", (int)(sizeof(name) / sizeof(name[0])));
     } else {
@@ -990,11 +1097,11 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
         clear_hotkey_block_if_released();
         if (hold_suppressed_until_release && hold_hotkey.modifiers != 0 &&
-            (mask & hold_hotkey.modifiers) != hold_hotkey.modifiers)
+            !modifiers_contain(mask, hold_hotkey.modifiers))
             hold_suppressed_until_release = 0;
         if (hold_provisional) {
             if (released &&
-                (mask & hold_hotkey.modifiers) != hold_hotkey.modifiers) {
+                !modifiers_contain(mask, hold_hotkey.modifiers)) {
                 clear_hold_provisional();
                 set_hold_active(0);
             }
@@ -1002,25 +1109,25 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         if (!hold_provisional) {
             if (hold_hotkey.key == 0) {
                 int should_hold = hotkeys_enabled && hold_hotkey.modifiers != 0 &&
-                                  mask == hold_hotkey.modifiers &&
+                                  modifiers_equal(mask, hold_hotkey.modifiers) &&
                                   !block_hotkey_until_clear &&
                                   !hold_suppressed_until_release;
-                if (should_hold && hold_hotkey_is_toggle_prefix())
+                if (should_hold && hold_hotkey_is_toggle_prefix(mask))
                     begin_hold_provisional();
                 else
                     set_hold_active(should_hold);
             } else if (hold_key_down) {
-                set_hold_active(hotkeys_enabled && mask == hold_hotkey.modifiers);
+                set_hold_active(hotkeys_enabled && modifiers_equal(mask, hold_hotkey.modifiers));
             }
         }
 
         if (hotkey.key == 0 && hotkey.modifiers != 0) {
-            if ((mask & hotkey.modifiers) != hotkey.modifiers)
+            if (!modifiers_contain(mask, hotkey.modifiers))
                 chord_down = 0;
             else if (hotkeys_enabled && (!hold_active || hold_provisional) && !released &&
-                     (mask == hotkey.modifiers ||
-                      (hold_provisional && hold_hotkey_is_toggle_prefix() &&
-                       (mask & hotkey.modifiers) == hotkey.modifiers)) && !chord_down &&
+                     (modifiers_equal(mask, hotkey.modifiers) ||
+                      (hold_provisional &&
+                       modifiers_contain(mask, hotkey.modifiers))) && !chord_down &&
                      !block_hotkey_until_clear) {
                 chord_down = 1;
                 if (hold_provisional) {
@@ -1061,7 +1168,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
 
     if (hold_provisional) {
         if (hotkeys_enabled && !block_hotkey_until_clear && hold_active &&
-            (active_modifiers() & hold_hotkey.modifiers) == hold_hotkey.modifiers) {
+            modifiers_contain(active_modifiers(), hold_hotkey.modifiers)) {
             confirm_hold_provisional();
         } else {
             clear_hold_provisional();
@@ -1146,7 +1253,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
         }
         if (hotkeys_enabled && !released && !block_hotkey_until_clear &&
-            active_modifiers() == hold_hotkey.modifiers) {
+            modifiers_equal(active_modifiers(), hold_hotkey.modifiers)) {
             hold_key_down = 1;
             set_hold_active(1);
             return 1;
@@ -1159,7 +1266,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
         }
         if (hotkeys_enabled && !hold_active && !released &&
-            !block_hotkey_until_clear && active_modifiers() == hotkey.modifiers) {
+            !block_hotkey_until_clear && modifiers_equal(active_modifiers(), hotkey.modifiers)) {
             hotkey_key_down = 1;
             mark_caps_restore_needed(hotkey);
             keymap_set_enabled(!enabled);
@@ -1201,7 +1308,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     if (!released && event->vkCode >= 'A' && event->vkCode <= 'Z') {
         unsigned int bit = 1U << (event->vkCode - 'A');
         if (keymap_is_enabled() &&
-            !(active_modifiers() & (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_WIN))) {
+            !(active_modifiers() & (KEYMAP_MOD_CTRL_SIDES | KEYMAP_MOD_ALT_SIDES | KEYMAP_MOD_WIN_SIDES))) {
             note_unmapped_letter_press();
             if (block_letters) {
                 blocked_letter_keys |= bit;
@@ -1231,7 +1338,7 @@ void keymap_handle_timer(UINT_PTR timer_id)
     if (timer_id != KEYMAP_HOLD_RESOLVE_TIMER_ID || !hold_provisional)
         return;
     if (!hotkeys_enabled || block_hotkey_until_clear || !hold_active ||
-        (active_modifiers() & hold_hotkey.modifiers) != hold_hotkey.modifiers) {
+        !modifiers_contain(active_modifiers(), hold_hotkey.modifiers)) {
         clear_hold_provisional();
         set_hold_active(0);
         return;

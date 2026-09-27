@@ -159,6 +159,16 @@ int main(void)
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL, 'K'}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_LCTRL, 'K'}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_RCTRL, 'K'}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_LALT, 'K'}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_RALT | KEYMAP_MOD_LSHIFT, 0}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_LCTRL | KEYMAP_MOD_RALT, 0}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_LCTRL, 'K'}));
+    assert(same_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 'K'},
+                       (keymap_hotkey){KEYMAP_MOD_LCTRL, 'K'}));
+    assert(!same_hotkey((keymap_hotkey){KEYMAP_MOD_LCTRL, 'K'},
+                        (keymap_hotkey){KEYMAP_MOD_RCTRL, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
@@ -192,6 +202,12 @@ int main(void)
     assert(keymap_is_enabled());
     assert(key_event(VK_SPACE, WM_KEYUP) == 1);
     modifier(VK_LSHIFT, 0);
+    keymap_set_enabled(0);
+    modifier(VK_RSHIFT, 1);
+    assert(key_event(VK_SPACE, WM_KEYDOWN) == 1);
+    assert(keymap_is_enabled());
+    assert(key_event(VK_SPACE, WM_KEYUP) == 1);
+    modifier(VK_RSHIFT, 0);
     keymap_set_enabled(0);
 
     /* Default Shift+Caps hold works whether Caps Lock or Shift is pressed first. */
@@ -231,7 +247,7 @@ int main(void)
     modifier(VK_LCONTROL, 1);
     modifier(VK_LCONTROL, 0);
     assert(!keymap_is_capturing());
-    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_CTRL));
+    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
     assert(caps_event(0) == 1);
     assert(!mock_caps_lock_on);
     /* An unrelated key keeps normal Caps Lock behavior. */
@@ -340,10 +356,18 @@ int main(void)
     key_event('K', WM_KEYDOWN);
     value = keymap_get_hotkey();
     assert(!keymap_is_capturing());
-    assert(value.modifiers == (KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT) && value.key == 'K');
+    assert(value.modifiers == (KEYMAP_MOD_LCTRL | KEYMAP_MOD_LSHIFT) && value.key == 'K');
     key_event('K', WM_KEYUP);
     modifier(VK_LSHIFT, 0);
     modifier(VK_LCONTROL, 0);
+    keymap_set_hold_hotkey((keymap_hotkey){0, 0});
+    modifier(VK_RCONTROL, 1);
+    modifier(VK_LSHIFT, 1);
+    key_event('K', WM_KEYDOWN);
+    assert(!keymap_is_enabled());
+    key_event('K', WM_KEYUP);
+    modifier(VK_LSHIFT, 0);
+    modifier(VK_RCONTROL, 0);
     modifier(VK_LCONTROL, 1);
     modifier(VK_LSHIFT, 1);
     key_event('K', WM_KEYDOWN);
@@ -353,13 +377,23 @@ int main(void)
     modifier(VK_LCONTROL, 0);
 
     keymap_set_enabled(0);
+    keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_RCTRL | KEYMAP_MOD_RSHIFT, 'K'});
+    modifier(VK_RCONTROL, 1);
+    modifier(VK_RSHIFT, 1);
+    key_event('K', WM_KEYDOWN);
+    assert(keymap_is_enabled());
+    key_event('K', WM_KEYUP);
+    modifier(VK_RSHIFT, 0);
+    modifier(VK_RCONTROL, 0);
+
+    keymap_set_enabled(0);
     keymap_begin_capture();
     modifier(VK_LCONTROL, 1);
     modifier(VK_LMENU, 1);
     modifier(VK_LSHIFT, 1);
     key_event('K', WM_KEYDOWN);
     value = keymap_get_hotkey();
-    assert(value.modifiers == (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT));
+    assert(value.modifiers == (KEYMAP_MOD_LCTRL | KEYMAP_MOD_LALT | KEYMAP_MOD_LSHIFT));
     assert(value.key == 'K');
     key_event('K', WM_KEYUP);
     modifier(VK_LSHIFT, 0);
@@ -381,7 +415,7 @@ int main(void)
     assert(!keymap_is_capturing());
     assert(keymap_get_hotkey().modifiers == value.modifiers);
     keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]), value);
-    assert(wcscmp(name, L"Ctrl + Alt + Shift + K") == 0);
+    assert(wcscmp(name, L"LCtrl + LAlt + LShift + K") == 0);
 
     keymap_begin_capture();
     keymap_begin_source_capture(6);
