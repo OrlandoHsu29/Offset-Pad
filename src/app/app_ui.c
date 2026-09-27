@@ -94,6 +94,8 @@ static HICON current_logo(void)
 #define COLOR_KEYCAP_OUTPUT RGB(244, 244, 244)
 #define COLOR_KEYCAP_HOVER RGB(240, 240, 240)
 #define COLOR_SWITCH_HOVER RGB(205, 205, 205)
+#define COLOR_AUTOSTART_HOVER_ON RGB(70, 70, 70)
+#define COLOR_AUTOSTART_HOVER_OFF RGB(190, 190, 190)
 
 static int scale(int value)
 {
@@ -292,10 +294,10 @@ static void paint_settings(HDC dc, const RECT *client)
 
     rect = scaled_rect(24, 89, 400, 164);
     rounded_box(dc, rect, COLOR_TINT, COLOR_TINT, 14);
-    rect = scaled_rect(43, 107, 332, 134);
+    rect = scaled_rect(43, 103, 332, 130);
     draw_label(dc, keymap_is_enabled() ? L"数字小键盘已开启" : L"当前为普通键盘模式",
                rect, heading_font, COLOR_INK, DT_SINGLELINE | DT_VCENTER);
-    rect = scaled_rect(43, 135, 386, 154);
+    rect = scaled_rect(43, 131, 386, 150);
     draw_label(dc, hint, rect, small_font,
                hint_color, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     rect = scaled_rect(341, 112, 381, 137);
@@ -463,8 +465,12 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
                       settings_autostart_enabled() : keymap_block_letters_enabled();
         COLORREF track = enabled ? COLOR_ACCENT : COLOR_BORDER;
         RECT knob = rect;
-        if (hovered)
-            track = enabled ? COLOR_ACCENT_HOVER : COLOR_SWITCH_HOVER;
+        if (hovered) {
+            if (item->CtlID == ID_AUTOSTART)
+                track = enabled ? COLOR_AUTOSTART_HOVER_ON : COLOR_AUTOSTART_HOVER_OFF;
+            else
+                track = enabled ? COLOR_ACCENT_HOVER : COLOR_SWITCH_HOVER;
+        }
         rounded_box(dc, rect, track, track, 12);
         knob.top += scale(3);
         knob.bottom -= scale(3);
