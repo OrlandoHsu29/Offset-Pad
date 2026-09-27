@@ -16,6 +16,8 @@
 #define ID_HOTKEY 104
 #define ID_BLOCK_LETTERS 105
 #define ID_HOLD_HOTKEY 106
+#define ID_AUTOSTART_CARD 107
+#define ID_BLOCK_LETTERS_CARD 108
 #define MENU_OPEN 201
 #define MENU_TOGGLE 202
 #define MENU_AUTOSTART 203
@@ -48,6 +50,18 @@ static HICON dark_logo;
 static app_ui_actions actions;
 static int tray_added;
 static int dpi = 96;
+static int hovered_source_key = -1;
+static int mouse_leave_tracking;
+static int hovered_button_id;
+
+typedef struct hover_button {
+    HWND window;
+    WNDPROC original_proc;
+    int id;
+    int tracking_mouse_leave;
+} hover_button;
+
+static hover_button hover_buttons[6];
 
 static HICON current_icon(void)
 {
@@ -71,9 +85,13 @@ static HICON current_logo(void)
 #define COLOR_ACCENT RGB(43, 43, 43)
 #define COLOR_ACCENT_DOWN RGB(22, 22, 22)
 #define COLOR_TINT RGB(246, 246, 246)
+#define COLOR_HOVER RGB(243, 243, 243)
+#define COLOR_ACCENT_HOVER RGB(58, 58, 58)
 #define COLOR_BORDER RGB(222, 222, 222)
 #define COLOR_KEYCAP RGB(252, 252, 252)
 #define COLOR_KEYCAP_OUTPUT RGB(244, 244, 244)
+#define COLOR_KEYCAP_HOVER RGB(240, 240, 240)
+#define COLOR_SWITCH_HOVER RGB(205, 205, 205)
 
 static int scale(int value)
 {
@@ -125,12 +143,99 @@ static void draw_label(HDC dc, const wchar_t *label, RECT rect,
     SelectObject(dc, old_font);
 }
 
+static hover_button *find_hover_button(HWND window)
+{
+    size_t index;
+    for (index = 0; index < sizeof(hover_buttons) / sizeof(hover_buttons[0]); ++index)
+        if (hover_buttons[index].window == window)
+            return &hover_buttons[index];
+    return NULL;
+}
+
+static void invalidate_hover_button(int id)
+{
+    size_t index;
+    if (id == 0)
+        return;
+    for (index = 0; index < sizeof(hover_buttons) / sizeof(hover_buttons[0]); ++index) {
+        if (hover_buttons[index].id == id && hover_buttons[index].window != NULL) {
+            InvalidateRect(hover_buttons[index].window, NULL, FALSE);
+            return;
+        }
+    }
+}
+
+static LRESULT CALLBACK hover_button_proc(HWND window, UINT message,
+                                          WPARAM wparam, LPARAM lparam)
+{
+    hover_button *button = find_hover_button(window);
+    WNDPROC original_proc;
+    if (button == NULL)
+        return DefWindowProcW(window, message, wparam, lparam);
+    original_proc = button->original_proc;
+    if (message == WM_MOUSEMOVE) {
+        TRACKMOUSEEVENT tracking = {sizeof(tracking), TME_LEAVE, window, HOVER_DEFAULT};
+        int previous_id = hovered_button_id;
+        if (!button->tracking_mouse_leave && TrackMouseEvent(&tracking))
+            button->tracking_mouse_leave = 1;
+        if (hovered_source_key >= 0) {
+            hovered_source_key = -1;
+            InvalidateRect(GetParent(window), NULL, FALSE);
+        }
+        hovered_button_id = button->id;
+        if (previous_id != hovered_button_id) {
+            invalidate_hover_button(previous_id);
+            InvalidateRect(window, NULL, FALSE);
+        }
+    } else if (message == WM_MOUSELEAVE) {
+        button->tracking_mouse_leave = 0;
+        if (hovered_button_id == button->id) {
+            hovered_button_id = 0;
+            InvalidateRect(window, NULL, FALSE);
+        }
+    } else if (message == WM_NCDESTROY) {
+        if (hovered_button_id == button->id)
+            hovered_button_id = 0;
+        ZeroMemory(button, sizeof(*button));
+        return CallWindowProcW(original_proc, window, message, wparam, lparam);
+    }
+    return CallWindowProcW(original_proc, window, message, wparam, lparam);
+}
+
+static void attach_hover_tracking(HWND window, int id)
+{
+    size_t index;
+    hover_button *button = NULL;
+    WNDPROC original_proc;
+    for (index = 0; index < sizeof(hover_buttons) / sizeof(hover_buttons[0]); ++index) {
+        if (hover_buttons[index].window == NULL) {
+            button = &hover_buttons[index];
+            break;
+        }
+    }
+    if (button == NULL)
+        return;
+    original_proc = (WNDPROC)GetWindowLongPtrW(window, GWLP_WNDPROC);
+    if (original_proc == NULL)
+        return;
+    button->window = window;
+    button->original_proc = original_proc;
+    button->id = id;
+    SetLastError(ERROR_SUCCESS);
+    if (SetWindowLongPtrW(window, GWLP_WNDPROC,
+                          (LONG_PTR)hover_button_proc) == 0 &&
+        GetLastError() != ERROR_SUCCESS)
+        ZeroMemory(button, sizeof(*button));
+}
+
 static void draw_keycap(HDC dc, int left, int top, int width,
-                        const wchar_t *label, int output, int selected)
+                        const wchar_t *label, int output, int selected, int hovered)
 {
     RECT rect = scaled_rect(left, top, left + width, top + 24);
-    rounded_box(dc, rect,
-                selected ? COLOR_ACCENT : (output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP),
+    COLORREF fill = selected ? COLOR_ACCENT :
+                    (hovered ? COLOR_KEYCAP_HOVER :
+                     (output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP));
+    rounded_box(dc, rect, fill,
                 selected ? COLOR_ACCENT : COLOR_BORDER, 7);
     draw_label(dc, label, rect,
                width <= 40 && wcslen(label) > 2 ? small_font : body_font,
@@ -227,9 +332,9 @@ static void paint_settings(HDC dc, const RECT *client)
                     draw_keycap(dc, source_left + column * 37, top, 29,
                                 selected ? L"?" :
                                 keymap_get_source(index) == VK_CAPITAL ? L"CL" : source_label,
-                                0, selected);
+                                0, selected, hovered_source_key == (int)index);
                     draw_keycap(dc, 275 + column * 37, top, 29,
-                                target_keys[row][column], 1, 0);
+                                target_keys[row][column], 1, 0, 0);
                 }
             } else {
                 int selected = keymap_is_source_capturing() &&
@@ -239,8 +344,8 @@ static void paint_settings(HDC dc, const RECT *client)
                                      sizeof(source_label) / sizeof(source_label[0]),
                                      keymap_get_source(9));
                 draw_keycap(dc, 74, top, 103,
-                            selected ? L"按键" : source_label, 0, selected);
-                draw_keycap(dc, 294, top, 66, L"0", 1, 0);
+                            selected ? L"按键" : source_label, 0, selected, hovered_source_key == 9);
+                draw_keycap(dc, 294, top, 66, L"0", 1, 0, 0);
             }
             rect = scaled_rect(215, top, 240, top + 24);
             draw_label(dc, L"→", rect, body_font, COLOR_MUTED,
@@ -311,16 +416,29 @@ static void draw_shortcut_value(HDC dc, const wchar_t *shortcut, RECT rect)
     }
 }
 
-static void draw_button(const DRAWITEMSTRUCT *item)
+static void draw_setting_card(const DRAWITEMSTRUCT *item)
+{
+    RECT rect = item->rcItem;
+    wchar_t label[64];
+    rounded_box(item->hDC, rect, COLOR_WHITE, COLOR_BORDER, 12);
+    rect.left += scale(14);
+    rect.right -= scale(58);
+    GetWindowTextW(item->hwndItem, label,
+                   (int)(sizeof(label) / sizeof(label[0])));
+    draw_label(item->hDC, label, rect, control_font, COLOR_INK,
+               DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+}
+
+static void draw_button_content(const DRAWITEMSTRUCT *item)
 {
     HDC dc = item->hDC;
     RECT rect = item->rcItem;
     int pressed = (item->itemState & ODS_SELECTED) != 0;
+    int hovered = hovered_button_id == (int)item->CtlID;
     COLORREF fill = COLOR_WHITE;
     COLORREF border = COLOR_BORDER;
     COLORREF ink = COLOR_INK;
     const wchar_t *label;
-    FillRect(dc, &rect, (HBRUSH)GetStockObject(WHITE_BRUSH));
 
     if (item->CtlID == ID_HOTKEY || item->CtlID == ID_HOLD_HOTKEY) {
         wchar_t shortcut[96];
@@ -328,7 +446,7 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         RECT value_rect = rect;
         int is_hold = item->CtlID == ID_HOLD_HOTKEY;
         int capturing = is_hold ? keymap_is_hold_capturing() : keymap_is_capturing();
-        fill = pressed ? COLOR_TINT : COLOR_WHITE;
+        fill = pressed ? COLOR_TINT : (hovered ? COLOR_HOVER : COLOR_WHITE);
         rounded_box(dc, rect, fill,
                     (pressed || capturing) ? COLOR_ACCENT : COLOR_BORDER, 12);
         name_rect.left += scale(14);
@@ -358,22 +476,11 @@ static void draw_button(const DRAWITEMSTRUCT *item)
     if (item->CtlID == ID_AUTOSTART || item->CtlID == ID_BLOCK_LETTERS) {
         int enabled = item->CtlID == ID_AUTOSTART ?
                       settings_autostart_enabled() : keymap_block_letters_enabled();
-        RECT switch_rect = rect;
-        RECT knob;
-        fill = pressed ? COLOR_TINT : COLOR_WHITE;
-        rounded_box(dc, rect, fill, pressed ? COLOR_ACCENT : COLOR_BORDER, 12);
-        rect.left += scale(14);
-        rect.right -= scale(58);
-        draw_label(dc, item->CtlID == ID_AUTOSTART ? L"开机时启动" : L"屏蔽字母防误触",
-                   rect, control_font, COLOR_INK,
-                   DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-        switch_rect.left = switch_rect.right - scale(54);
-        switch_rect.right -= scale(12);
-        switch_rect.top += scale(11);
-        switch_rect.bottom -= scale(11);
-        rounded_box(dc, switch_rect, enabled ? COLOR_ACCENT : COLOR_BORDER,
-                    enabled ? COLOR_ACCENT : COLOR_BORDER, 24);
-        knob = switch_rect;
+        COLORREF track = enabled ? COLOR_ACCENT : COLOR_BORDER;
+        RECT knob = rect;
+        if (hovered)
+            track = enabled ? COLOR_ACCENT_HOVER : COLOR_SWITCH_HOVER;
+        rounded_box(dc, rect, track, track, 12);
         knob.top += scale(3);
         knob.bottom -= scale(3);
         if (enabled) {
@@ -386,14 +493,13 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         rounded_box(dc, knob, COLOR_WHITE, COLOR_WHITE, 17);
         return;
     }
-
     if (item->CtlID == ID_TOGGLE) {
-        fill = pressed ? COLOR_ACCENT_DOWN : COLOR_ACCENT;
+        fill = pressed ? COLOR_ACCENT_DOWN : (hovered ? COLOR_ACCENT_HOVER : COLOR_ACCENT);
         border = fill;
         ink = COLOR_WHITE;
         label = keymap_is_latched() ? L"关闭小键盘" : L"开启小键盘";
     } else {
-        fill = pressed ? COLOR_TINT : COLOR_WHITE;
+        fill = pressed ? COLOR_KEYCAP_HOVER : (hovered ? COLOR_TINT : COLOR_WHITE);
         label = L"关闭";
     }
     rounded_box(dc, rect, fill, border, 11);
@@ -401,6 +507,51 @@ static void draw_button(const DRAWITEMSTRUCT *item)
                DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
+static void draw_button(const DRAWITEMSTRUCT *item)
+{
+    DRAWITEMSTRUCT buffered_item = *item;
+    RECT target = item->rcItem;
+    int width = target.right - target.left;
+    int height = target.bottom - target.top;
+    HDC buffer_dc;
+    HBITMAP buffer_bitmap;
+    HGDIOBJ previous_bitmap;
+    RECT buffer_rect;
+
+    if (width <= 0 || height <= 0) {
+        draw_button_content(item);
+        return;
+    }
+
+    buffer_dc = CreateCompatibleDC(item->hDC);
+    if (!buffer_dc) {
+        draw_button_content(item);
+        return;
+    }
+    buffer_bitmap = CreateCompatibleBitmap(item->hDC, width, height);
+    if (!buffer_bitmap) {
+        DeleteDC(buffer_dc);
+        draw_button_content(item);
+        return;
+    }
+
+    previous_bitmap = SelectObject(buffer_dc, buffer_bitmap);
+    buffer_rect.left = 0;
+    buffer_rect.top = 0;
+    buffer_rect.right = width;
+    buffer_rect.bottom = height;
+    FillRect(buffer_dc, &buffer_rect,
+             (HBRUSH)GetStockObject(WHITE_BRUSH));
+    buffered_item.hDC = buffer_dc;
+    buffered_item.rcItem = buffer_rect;
+    draw_button_content(&buffered_item);
+    BitBlt(item->hDC, target.left, target.top, width, height,
+           buffer_dc, 0, 0, SRCCOPY);
+
+    SelectObject(buffer_dc, previous_bitmap);
+    DeleteObject(buffer_bitmap);
+    DeleteDC(buffer_dc);
+}
 static void show_error(const wchar_t *message)
 {
     MessageBoxW(settings_window, message, L"Offset Pad", MB_OK | MB_ICONERROR);
@@ -491,14 +642,14 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                               scale(224), scale(353), scale(176), scale(46),
                                               window, (HMENU)(INT_PTR)ID_HOLD_HOTKEY, instance, NULL);
-        block_letters_check = CreateWindowExW(0, L"BUTTON", L"屏蔽字母防误触",
-                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        CreateWindowExW(0, L"STATIC", L"屏蔽字母防误触",
+                                              WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
                                               scale(24), scale(409), scale(196), scale(46),
-                                              window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS, instance, NULL);
-        autostart_check = CreateWindowExW(0, L"BUTTON", L"开机时启动",
-                                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                              window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS_CARD, instance, NULL);
+        CreateWindowExW(0, L"STATIC", L"开机时启动",
+                                           WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
                                            scale(232), scale(409), scale(168), scale(46),
-                                           window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
+                                           window, (HMENU)(INT_PTR)ID_AUTOSTART_CARD, instance, NULL);
         toggle_button = CreateWindowExW(0, L"BUTTON", L"开启小键盘",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                          scale(24), scale(467), scale(180), scale(39),
@@ -507,6 +658,20 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                         scale(220), scale(467), scale(180), scale(39),
                         window, (HMENU)(INT_PTR)ID_CLOSE, instance, NULL);
+        block_letters_check = CreateWindowExW(0, L"BUTTON", L"",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                        scale(166), scale(420), scale(42), scale(24),
+                        window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS, instance, NULL);
+        autostart_check = CreateWindowExW(0, L"BUTTON", L"",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                        scale(346), scale(420), scale(42), scale(24),
+                        window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
+        attach_hover_tracking(GetDlgItem(window, ID_HOTKEY), ID_HOTKEY);
+        attach_hover_tracking(GetDlgItem(window, ID_HOLD_HOTKEY), ID_HOLD_HOTKEY);
+        attach_hover_tracking(GetDlgItem(window, ID_BLOCK_LETTERS), ID_BLOCK_LETTERS);
+        attach_hover_tracking(GetDlgItem(window, ID_AUTOSTART), ID_AUTOSTART);
+        attach_hover_tracking(GetDlgItem(window, ID_TOGGLE), ID_TOGGLE);
+        attach_hover_tracking(GetDlgItem(window, ID_CLOSE), ID_CLOSE);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -552,11 +717,39 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         }
         return 0;
     case WM_DRAWITEM:
-        if (lparam != 0 && ((DRAWITEMSTRUCT *)lparam)->CtlType == ODT_BUTTON) {
-            draw_button((const DRAWITEMSTRUCT *)lparam);
-            return TRUE;
+        if (lparam != 0) {
+            const DRAWITEMSTRUCT *item = (const DRAWITEMSTRUCT *)lparam;
+            if (item->CtlType == ODT_STATIC) {
+                draw_setting_card(item);
+                return TRUE;
+            }
+            if (item->CtlType == ODT_BUTTON) {
+                draw_button(item);
+                return TRUE;
+            }
         }
         break;
+    case WM_MOUSEMOVE:
+        {
+            TRACKMOUSEEVENT tracking = {sizeof(tracking), TME_LEAVE, window, HOVER_DEFAULT};
+            POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+            int key_index;
+            if (!mouse_leave_tracking && TrackMouseEvent(&tracking))
+                mouse_leave_tracking = 1;
+            key_index = source_key_at(point);
+            if (hovered_source_key != key_index) {
+                hovered_source_key = key_index;
+                InvalidateRect(window, NULL, FALSE);
+            }
+        }
+        return 0;
+    case WM_MOUSELEAVE:
+        mouse_leave_tracking = 0;
+        if (hovered_source_key >= 0) {
+            hovered_source_key = -1;
+            InvalidateRect(window, NULL, FALSE);
+        }
+        return 0;
     case WM_LBUTTONUP:
         {
             POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
@@ -631,6 +824,9 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         block_letters_check = NULL;
         hotkey_button = NULL;
         hold_hotkey_button = NULL;
+        hovered_source_key = -1;
+        mouse_leave_tracking = 0;
+        hovered_button_id = 0;
         return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
