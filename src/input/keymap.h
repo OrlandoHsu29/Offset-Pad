@@ -10,6 +10,8 @@
 #define KEYMAP_MOD_SHIFT 4U
 #define KEYMAP_MOD_WIN   8U
 #define KEYMAP_MOD_CAPS  16U
+#define KEYMAP_MOD_ALL   (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | \
+                          KEYMAP_MOD_WIN | KEYMAP_MOD_CAPS)
 #define KEYMAP_KEY_COUNT 10
 #define KEYMAP_HOLD_RESOLVE_TIMER_ID 0x4F50U
 #define KEYMAP_CAPS_RELEASE_TIMER_ID 0x4F51U
@@ -35,6 +37,7 @@ void keymap_set_hotkeys_enabled(int enabled);
 int keymap_hotkeys_enabled(void);
 void keymap_set_hold_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hold_hotkey(void);
+void keymap_set_hotkeys(keymap_hotkey hotkey, keymap_hotkey hold_hotkey);
 void keymap_set_block_letters(int enabled);
 int keymap_block_letters_enabled(void);
 void keymap_set_hotkey(keymap_hotkey hotkey);

@@ -160,6 +160,12 @@ int main(void)
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
+    assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 0}) ==
+           KEYMAP_CAPTURE_INVALID_COUNT);
+    assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_ALT, 'K'}) ==
+           KEYMAP_CAPTURE_INVALID_ALT);
+    assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 'K'}) ==
+           KEYMAP_CAPTURE_SAVED);
     keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]),
                          (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
     assert(wcscmp(name, L"Caps + Shift") == 0);
@@ -168,6 +174,14 @@ int main(void)
            keymap_get_hotkey().key == VK_SPACE);
     assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_SHIFT | KEYMAP_MOD_CAPS) &&
            keymap_get_hold_hotkey().key == 0);
+
+    keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
+                       (keymap_hotkey){KEYMAP_MOD_CTRL, 'K'});
+    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(keymap_get_hold_hotkey().modifiers == KEYMAP_MOD_CTRL &&
+           keymap_get_hold_hotkey().key == 'K');
+    keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE},
+                       (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
 
     /* Default Shift+Space toggles the mode. */
     keymap_set_enabled(0);
@@ -243,6 +257,21 @@ int main(void)
     assert(keymap_is_enabled());
     keymap_set_enabled(0);
 
+    /* Starting capture while Caps is held must not skip the pending restore. */
+    mock_caps_lock_on = 0;
+    assert(caps_event(1) == 0);
+    assert(mock_caps_lock_on);
+    modifier(VK_LSHIFT, 1);
+    assert(keymap_is_enabled());
+    keymap_begin_capture();
+    assert(caps_event(0) == 0);
+    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
+    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    assert(!mock_caps_lock_on);
+    keymap_cancel_capture();
+    modifier(VK_LSHIFT, 0);
+    keymap_set_enabled(0);
+
     /* Non-Caps shortcuts bypass Caps tracking and preserve ordinary Caps behavior. */
     keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE});
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 0});
@@ -267,6 +296,16 @@ int main(void)
     assert(caps_event(0) == 1);
     modifier(VK_LSHIFT, 0);
     assert(keymap_is_enabled());
+    keymap_set_enabled(0);
+
+    /* Disabling hotkeys still consumes the key-up paired with a swallowed Caps down. */
+    modifier(VK_LSHIFT, 1);
+    assert(caps_event(1) == 1);
+    assert(keymap_is_enabled());
+    keymap_set_hotkeys_enabled(0);
+    assert(caps_event(0) == 1);
+    modifier(VK_LSHIFT, 0);
+    keymap_set_hotkeys_enabled(1);
     keymap_set_enabled(0);
 
     /* Caps-first Alt hold defers Caps cleanup until the physical key-up. */
