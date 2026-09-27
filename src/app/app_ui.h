@@ -17,6 +17,7 @@ void ui_shutdown(void);
 void ui_show(void);
 void ui_refresh(void);
 void ui_show_mode_reminder(void);
+void ui_hotkey_capture_result(WPARAM result);
 void ui_tray_message(LPARAM message);
 void ui_taskbar_created(void);
 int ui_handle_dialog_message(MSG *message);

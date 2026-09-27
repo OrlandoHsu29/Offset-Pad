@@ -25,6 +25,7 @@
 #define MENU_DISABLE_HOTKEYS 205
 #define IDI_APP_ICON_LIGHT 101
 #define IDI_APP_ICON_DARK 102
+#define OFFSET_PAD_VERSION L"0.2.1"
 
 static const wchar_t settings_class[] = L"OffsetPadSettingsWindow";
 static HINSTANCE instance;
@@ -53,6 +54,7 @@ static int dpi = 96;
 static int hovered_source_key = -1;
 static int mouse_leave_tracking;
 static int hovered_button_id;
+static wchar_t hotkey_capture_status[128];
 
 typedef struct hover_button {
     HWND window;
@@ -255,10 +257,14 @@ static void paint_settings(HDC dc, const RECT *client)
     wchar_t hint[192];
     HBRUSH background = CreateSolidBrush(COLOR_WHITE);
     COLORREF accent = keymap_is_enabled() ? COLOR_ACCENT : COLOR_MUTED;
+    COLORREF hint_color = hotkey_capture_status[0] != L'\0' ? RGB(180, 82, 82) : COLOR_MUTED;
     FillRect(dc, client, background);
     DeleteObject(background);
     if (keymap_is_capturing() || keymap_is_hold_capturing()) {
         lstrcpynW(hint, L"录入快捷键：Del/Back 清除，Esc 取消",
+                  (int)(sizeof(hint) / sizeof(hint[0])));
+    } else if (hotkey_capture_status[0] != L'\0') {
+        lstrcpynW(hint, hotkey_capture_status,
                   (int)(sizeof(hint) / sizeof(hint[0])));
     } else if (hotkey_is_set(keymap_get_hotkey())) {
         keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
@@ -291,7 +297,7 @@ static void paint_settings(HDC dc, const RECT *client)
                rect, heading_font, COLOR_INK, DT_SINGLELINE | DT_VCENTER);
     rect = scaled_rect(43, 135, 386, 154);
     draw_label(dc, hint, rect, small_font,
-               COLOR_MUTED, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+               hint_color, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     rect = scaled_rect(341, 112, 381, 137);
     rounded_box(dc, rect, keymap_is_enabled() ? COLOR_ACCENT : COLOR_WHITE,
                 keymap_is_enabled() ? COLOR_ACCENT : COLOR_BORDER, 12);
@@ -397,7 +403,7 @@ static void draw_shortcut_value(HDC dc, const wchar_t *shortcut, RECT rect)
             break;
         part = separator + 3;
     }
-    line_count = part_count > 2 ? 2 : part_count;
+    line_count = part_count > 2 ? 2 : 1;
     for (index = 0; index < line_count; ++index) {
         GetTextExtentPoint32W(dc, lines[index], (int)wcslen(lines[index]),
                               &extent);
@@ -454,8 +460,8 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         draw_label(dc, is_hold ? L"按住时输入" : L"按下切换模式",
                    name_rect, control_font, COLOR_INK,
                    DT_SINGLELINE | DT_VCENTER);
-        value_rect.left += scale(is_hold ? 98 : 112);
-        value_rect.right -= scale(14);
+        value_rect.left += scale(is_hold ? 98 : 110);
+        value_rect.right -= scale(is_hold ? 14 : 12);
         if (is_hold && keymap_is_hold_capturing())
             lstrcpynW(shortcut, L"录入中",
                       (int)(sizeof(shortcut) / sizeof(shortcut[0])));
@@ -600,6 +606,30 @@ void ui_show_mode_reminder(void)
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
+void ui_hotkey_capture_result(WPARAM result)
+{
+    switch (result) {
+    case KEYMAP_CAPTURE_INVALID_ALT:
+        lstrcpynW(hotkey_capture_status,
+                  L"不支持 Alt+单键/Alt+Shift：易导致文本框失去聚焦",
+                  (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
+        break;
+    case KEYMAP_CAPTURE_INVALID_COUNT:
+        lstrcpynW(hotkey_capture_status,
+                  L"快捷键需由 2–4 个键组成，且至少包含一个修饰键",
+                  (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
+        break;
+    case KEYMAP_CAPTURE_INVALID:
+        lstrcpynW(hotkey_capture_status,
+                  L"快捷键已占用或与另一个快捷键冲突，请换一个组合",
+                  (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
+        break;
+    default:
+        hotkey_capture_status[0] = L'\0';
+        break;
+    }
+    ui_refresh();
+}
 void ui_refresh(void)
 {
     NOTIFYICONDATAW data = {0};
@@ -767,15 +797,19 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         case ID_HOTKEY:
             if (keymap_is_capturing())
                 keymap_cancel_capture();
-            else
+            else {
+                hotkey_capture_status[0] = L'\0';
                 keymap_begin_capture();
+            }
             ui_refresh();
             return 0;
         case ID_HOLD_HOTKEY:
             if (keymap_is_hold_capturing())
                 keymap_cancel_capture();
-            else
+            else {
+                hotkey_capture_status[0] = L'\0';
                 keymap_begin_hold_capture();
+            }
             ui_refresh();
             return 0;
         case ID_TOGGLE:
@@ -928,14 +962,14 @@ void ui_show(void)
                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         if (compact_font == NULL)
-            compact_font = CreateFontW(-scale(10), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            compact_font = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         rect = scaled_rect(0, 0, 424, 542);
         AdjustWindowRect(&rect, style, FALSE);
         width = rect.right - rect.left;
         height = rect.bottom - rect.top;
-        settings_window = CreateWindowExW(WS_EX_APPWINDOW, settings_class, L"Offset Pad 设置",
+        settings_window = CreateWindowExW(WS_EX_APPWINDOW, settings_class, L"Offset Pad v" OFFSET_PAD_VERSION,
                                            style,
                                            (GetSystemMetrics(SM_CXSCREEN) - width) / 2,
                                            (GetSystemMetrics(SM_CYSCREEN) - height) / 2,

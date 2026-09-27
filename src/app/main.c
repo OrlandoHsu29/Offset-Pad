@@ -78,27 +78,21 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_refresh();
         return 0;
     case WM_OFFSET_PAD_HOLD_CAPTURE_DONE:
-        if (wparam == KEYMAP_CAPTURE_INVALID)
-            MessageBoxW(window, L"快捷键已占用或与数字映射冲突，请换一个组合。",
-                        L"Offset Pad", MB_OK | MB_ICONINFORMATION);
-        else if (wparam == KEYMAP_CAPTURE_SAVED &&
-                 !settings_save_hold_hotkey(keymap_get_hold_hotkey()))
+        ui_hotkey_capture_result(wparam);
+        if (wparam == KEYMAP_CAPTURE_SAVED &&
+            !settings_save_hold_hotkey(keymap_get_hold_hotkey()))
             MessageBoxW(window, L"无法保存按住快捷键；本次运行仍会使用新快捷键。",
                         L"Offset Pad", MB_OK | MB_ICONERROR);
-        ui_refresh();
         return 0;
     case WM_OFFSET_PAD_MODE_REMINDER:
         ui_show_mode_reminder();
         return 0;
     case WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE:
-        if (wparam == KEYMAP_CAPTURE_INVALID)
-            MessageBoxW(window, L"快捷键已占用或与数字映射冲突，请换一个组合。",
-                        L"Offset Pad", MB_OK | MB_ICONINFORMATION);
-        else if (wparam == KEYMAP_CAPTURE_SAVED &&
-                 !settings_save_hotkey(keymap_get_hotkey()))
+        ui_hotkey_capture_result(wparam);
+        if (wparam == KEYMAP_CAPTURE_SAVED &&
+            !settings_save_hotkey(keymap_get_hotkey()))
             MessageBoxW(window, L"无法保存快捷键；本次运行仍会使用新快捷键。",
                         L"Offset Pad", MB_OK | MB_ICONERROR);
-        ui_refresh();
         return 0;
     case WM_OFFSET_PAD_SOURCE_CAPTURE_DONE:
         if (wparam == KEYMAP_CAPTURE_INVALID) {
