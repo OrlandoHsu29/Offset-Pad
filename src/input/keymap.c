@@ -623,8 +623,8 @@ static int validate_hotkey(keymap_hotkey value)
         return key_count < 2 || key_count > 4 ?
                KEYMAP_CAPTURE_INVALID_COUNT : KEYMAP_CAPTURE_INVALID;
     if ((value.modifiers == KEYMAP_MOD_ALT && value.key != 0) ||
-        ((value.modifiers & (KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT)) ==
-         (KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT) && value.key == 0))
+        (value.modifiers == (KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT) &&
+         value.key == 0))
         return KEYMAP_CAPTURE_INVALID_ALT;
     return KEYMAP_CAPTURE_SAVED;
 }

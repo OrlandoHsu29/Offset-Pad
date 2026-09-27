@@ -155,6 +155,8 @@ int main(void)
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL, 0}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT, 'K'}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0}));
@@ -440,8 +442,9 @@ int main(void)
     keymap_begin_capture();
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(keymap_get_hotkey().modifiers == KEYMAP_MOD_SHIFT &&
-           keymap_get_hotkey().key == VK_SPACE);
+    assert(keymap_get_hotkey().modifiers ==
+           (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT) &&
+           keymap_get_hotkey().key == 0);
 
     keymap_set_enabled(1);
     sent_count = 0;
