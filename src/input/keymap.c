@@ -106,6 +106,17 @@ static unsigned int active_modifiers(void)
     return mask;
 }
 
+static void sync_modifier_state_from_os(int current_modifier)
+{
+    size_t index;
+    /* Apps may consume physical modifier key-ups and replace them with injected events. */
+    for (index = 0; index < SIDE_MODIFIER_COUNT; ++index) {
+        if ((int)index == current_modifier)
+            continue;
+        modifiers[index] = (GetAsyncKeyState(modifier_keys[index]) & 0x8000) != 0;
+    }
+}
+
 static int modifier_encoding_valid(unsigned int value)
 {
     return !((value & KEYMAP_MOD_CTRL) && (value & KEYMAP_MOD_CTRL_SIDES)) &&
@@ -1053,6 +1064,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         !hold_key_is_swallowed(VK_CAPITAL))
         return CallNextHookEx(hook, code, message, parameter);
     if (modifier >= 0) {
+        sync_modifier_state_from_os(modifier);
         was_hold_suspended = hold_modifiers_suspended;
         caps_key_was_passed = modifier == CAPS_MODIFIER_INDEX && released &&
                               caps_press_was_passed();
