@@ -69,6 +69,16 @@ int settings_save_hotkeys_enabled(int enabled)
     return save_dword(L"HotkeysEnabled", enabled != 0);
 }
 
+int settings_load_auto_updates(void)
+{
+    return load_dword(L"AutoUpdates", 1) != 0;
+}
+
+int settings_save_auto_updates(int enabled)
+{
+    return save_dword(L"AutoUpdates", enabled != 0);
+}
+
 keymap_hotkey settings_load_hotkey(void)
 {
     return load_hotkey(L"ToggleHotkey", DEFAULT_HOTKEY);

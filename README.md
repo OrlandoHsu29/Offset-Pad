@@ -38,6 +38,10 @@ Offset Pad 把右手打字区临时变成近似九宫格的小键盘。左手按
 
 ![Offset Pad 设置窗口](media/run.png)
 
+## 自动检查更新
+
+启用“自动检查更新”后，Offset Pad 每次启动时会查询 GitHub Releases；发现新版本时通过系统托盘通知提示。此功能只检查并打开发布页，不会自动下载或安装。
+
 源码构建与项目结构见 [src/README.md](src/README.md)。
 
 本项目采用 [MIT License](LICENSE)。

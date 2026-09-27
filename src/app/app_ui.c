@@ -5,6 +5,7 @@
 #include <wchar.h>
 
 #include "app_ui.h"
+#include "app_version.h"
 #include "app_settings.h"
 #include "rounded_box.h"
 #include "keymap.h"
@@ -18,6 +19,8 @@
 #define ID_HOLD_HOTKEY 106
 #define ID_AUTOSTART_CARD 107
 #define ID_BLOCK_LETTERS_CARD 108
+#define ID_AUTO_UPDATES 109
+#define ID_UPDATE_LINK 110
 #define MENU_OPEN 201
 #define MENU_TOGGLE 202
 #define MENU_AUTOSTART 203
@@ -25,7 +28,7 @@
 #define MENU_DISABLE_HOTKEYS 205
 #define IDI_APP_ICON_LIGHT 101
 #define IDI_APP_ICON_DARK 102
-#define OFFSET_PAD_VERSION L"0.2.3"
+
 
 static const wchar_t settings_class[] = L"OffsetPadSettingsWindow";
 static HINSTANCE instance;
@@ -36,6 +39,10 @@ static HWND autostart_check;
 static HWND block_letters_check;
 static HWND hotkey_button;
 static HWND hold_hotkey_button;
+static HWND auto_updates_check;
+static HWND update_link_button;
+static int update_available;
+static int update_notice_active;
 static HFONT title_font;
 static HFONT heading_font;
 static HFONT body_font;
@@ -63,7 +70,7 @@ typedef struct hover_button {
     int tracking_mouse_leave;
 } hover_button;
 
-static hover_button hover_buttons[6];
+static hover_button hover_buttons[8];
 
 static HICON current_icon(void)
 {
@@ -106,6 +113,19 @@ static RECT scaled_rect(int left, int top, int right, int bottom)
 {
     RECT rect = {scale(left), scale(top), scale(right), scale(bottom)};
     return rect;
+}
+
+static int header_update_button_left(void)
+{
+    HDC dc = GetDC(NULL);
+    SIZE extent = {0};
+    if (dc != NULL) {
+        HGDIOBJ old_font = SelectObject(dc, title_font);
+        GetTextExtentPoint32W(dc, L"Offset Pad", 10, &extent);
+        SelectObject(dc, old_font);
+        ReleaseDC(NULL, dc);
+    }
+    return scale(84) + extent.cx + scale(6);
 }
 
 static RECT source_key_rect(size_t index)
@@ -360,9 +380,12 @@ static void paint_settings(HDC dc, const RECT *client)
                        DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
     }
-    rect = scaled_rect(24, 514, 400, 533);
+    rect = scaled_rect(185, 514, 400, 533);
     draw_label(dc, L"关闭窗口后继续在托盘运行", rect, small_font, COLOR_MUTED,
-               DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+               DT_SINGLELINE | DT_RIGHT | DT_VCENTER);
+    draw_label(dc, L"自动检查更新", scaled_rect(46, 514, 155, 533), small_font, COLOR_MUTED,
+               DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+
 }
 
 static void draw_shortcut_value(HDC dc, const wchar_t *shortcut, RECT rect)
@@ -460,6 +483,69 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         return;
     }
 
+    if (item->CtlID == ID_UPDATE_LINK) {
+        int diameter = scale(19);
+        RECT circle = rect;
+        COLORREF badge_fill = hovered ? COLOR_ACCENT_HOVER : COLOR_ACCENT;
+        HPEN pen;
+        HGDIOBJ old_pen;
+        POINT arrow[3];
+        circle.left += (rect.right - rect.left - diameter) / 2;
+        circle.top += (rect.bottom - rect.top - diameter) / 2;
+        circle.right = circle.left + diameter;
+        circle.bottom = circle.top + diameter;
+        rounded_box(dc, circle, badge_fill, badge_fill, diameter / 2);
+        pen = CreatePen(PS_SOLID, scale(1) > 0 ? scale(1) : 1, COLOR_WHITE);
+        old_pen = pen != NULL ? SelectObject(dc, pen) : NULL;
+        if (pen != NULL) {
+            arrow[0].x = circle.left + diameter / 2;
+            arrow[0].y = circle.top + scale(5);
+            arrow[1].x = circle.left + diameter / 2;
+            arrow[1].y = circle.bottom - scale(5);
+            Polyline(dc, arrow, 2);
+            arrow[0].x = circle.left + scale(5);
+            arrow[0].y = circle.top + scale(9);
+            arrow[1].x = circle.left + diameter / 2;
+            arrow[1].y = circle.top + scale(5);
+            arrow[2].x = circle.right - scale(5);
+            arrow[2].y = circle.top + scale(9);
+            Polyline(dc, arrow, 3);
+            SelectObject(dc, old_pen);
+            DeleteObject(pen);
+        }
+        return;
+    }
+    if (item->CtlID == ID_AUTO_UPDATES) {
+        int enabled = settings_load_auto_updates();
+        int diameter = scale(14);
+        RECT circle = rect;
+        COLORREF circle_fill = enabled ?
+                        (hovered ? COLOR_ACCENT_HOVER : COLOR_ACCENT) : COLOR_WHITE;
+        COLORREF circle_outline = enabled ? circle_fill :
+                                  (hovered ? COLOR_ACCENT_HOVER : COLOR_BORDER);
+        circle.left += (rect.right - rect.left - diameter) / 2;
+        circle.top += (rect.bottom - rect.top - diameter) / 2;
+        circle.right = circle.left + diameter;
+        circle.bottom = circle.top + diameter;
+        rounded_box(dc, circle, circle_fill, circle_outline, diameter / 2);
+        if (enabled) {
+            POINT check[3];
+            HPEN check_pen = CreatePen(PS_SOLID, scale(2), COLOR_WHITE);
+            HGDIOBJ old_check_pen = check_pen != NULL ? SelectObject(dc, check_pen) : NULL;
+            check[0].x = circle.left + scale(3);
+            check[0].y = circle.top + scale(7);
+            check[1].x = circle.left + scale(6);
+            check[1].y = circle.top + scale(10);
+            check[2].x = circle.left + scale(11);
+            check[2].y = circle.top + scale(4);
+            if (check_pen != NULL) {
+                Polyline(dc, check, 3);
+                SelectObject(dc, old_check_pen);
+                DeleteObject(check_pen);
+            }
+        }
+        return;
+    }
     if (item->CtlID == ID_AUTOSTART || item->CtlID == ID_BLOCK_LETTERS) {
         int enabled = item->CtlID == ID_AUTOSTART ?
                       settings_autostart_enabled() : keymap_block_letters_enabled();
@@ -569,6 +655,7 @@ static void add_tray(void)
 
 void ui_show_mode_reminder(void)
 {
+    update_notice_active = 0;
     NOTIFYICONDATAW data = {0};
     wchar_t shortcut[96];
     if (!tray_added || !keymap_is_enabled())
@@ -591,6 +678,29 @@ void ui_show_mode_reminder(void)
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
+void ui_show_update_available(const wchar_t *version)
+{
+    NOTIFYICONDATAW data = {0};
+    if (version == NULL)
+        return;
+    update_available = 1;
+    if (update_link_button != NULL) {
+        ShowWindow(update_link_button, SW_SHOWNA);
+        InvalidateRect(update_link_button, NULL, FALSE);
+    }
+    if (!tray_added)
+        return;
+    update_notice_active = 1;
+    data.cbSize = sizeof(data);
+    data.hWnd = message_window;
+    data.uID = TRAY_ID;
+    data.uFlags = NIF_INFO | NIF_REALTIME;
+    data.dwInfoFlags = NIIF_INFO;
+    lstrcpynW(data.szInfoTitle, L"Offset Pad 更新", (int)(sizeof(data.szInfoTitle) / sizeof(data.szInfoTitle[0])));
+    swprintf(data.szInfo, sizeof(data.szInfo) / sizeof(data.szInfo[0]),
+             L"发现新版本 %ls。点击此通知查看 GitHub Releases。", version);
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+}
 void ui_hotkey_capture_result(WPARAM result)
 {
     switch (result) {
@@ -633,6 +743,10 @@ void ui_refresh(void)
         InvalidateRect(hotkey_button, NULL, FALSE);
     if (hold_hotkey_button != NULL)
         InvalidateRect(hold_hotkey_button, NULL, FALSE);
+    if (auto_updates_check != NULL)
+        InvalidateRect(auto_updates_check, NULL, FALSE);
+    if (update_link_button != NULL)
+        InvalidateRect(update_link_button, NULL, FALSE);
     if (tray_added) {
         data.cbSize = sizeof(data);
         data.hWnd = message_window;
@@ -681,12 +795,23 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                         scale(346), scale(420), scale(42), scale(24),
                         window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
+        auto_updates_check = CreateWindowExW(0, L"BUTTON", L"",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                        scale(24), scale(515), scale(16), scale(16),
+                        window, (HMENU)(INT_PTR)ID_AUTO_UPDATES, instance, NULL);
+        update_link_button = CreateWindowExW(0, L"BUTTON", L"有可用更新，点击查看",
+                        WS_CHILD | WS_TABSTOP | BS_OWNERDRAW |
+                        (update_available ? WS_VISIBLE : 0),
+                        header_update_button_left(), scale(23), scale(24), scale(24),
+                        window, (HMENU)(INT_PTR)ID_UPDATE_LINK, instance, NULL);
         attach_hover_tracking(GetDlgItem(window, ID_HOTKEY), ID_HOTKEY);
         attach_hover_tracking(GetDlgItem(window, ID_HOLD_HOTKEY), ID_HOLD_HOTKEY);
         attach_hover_tracking(GetDlgItem(window, ID_BLOCK_LETTERS), ID_BLOCK_LETTERS);
         attach_hover_tracking(GetDlgItem(window, ID_AUTOSTART), ID_AUTOSTART);
         attach_hover_tracking(GetDlgItem(window, ID_TOGGLE), ID_TOGGLE);
         attach_hover_tracking(GetDlgItem(window, ID_CLOSE), ID_CLOSE);
+        attach_hover_tracking(GetDlgItem(window, ID_AUTO_UPDATES), ID_AUTO_UPDATES);
+        attach_hover_tracking(GetDlgItem(window, ID_UPDATE_LINK), ID_UPDATE_LINK);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -700,6 +825,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             if (source_key_at(point) >= 0 ||
                 id == ID_HOTKEY || id == ID_HOLD_HOTKEY ||
                 id == ID_AUTOSTART || id == ID_BLOCK_LETTERS ||
+                id == ID_AUTO_UPDATES || id == ID_UPDATE_LINK ||
                 id == ID_TOGGLE || id == ID_CLOSE)
                 SetCursor(LoadCursorW(NULL, IDC_HAND));
             else
@@ -818,6 +944,17 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 show_error(L"无法保存开机时启动设置。");
             ui_refresh();
             return 0;
+        case ID_UPDATE_LINK:
+            ShellExecuteW(NULL, L"open",
+                          L"https://github.com/OrlandoHsu29/Offset-Pad/releases/latest",
+                          NULL, NULL, SW_SHOWNORMAL);
+            return 0;
+        case ID_AUTO_UPDATES:
+            keymap_cancel_capture();
+            if (!settings_save_auto_updates(!settings_load_auto_updates()))
+                show_error(L"无法保存自动检查更新设置。");
+            ui_refresh();
+            return 0;
         case ID_CLOSE:
             PostMessageW(window, WM_CLOSE, 0, 0);
             return 0;
@@ -843,6 +980,8 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         block_letters_check = NULL;
         hotkey_button = NULL;
         hold_hotkey_button = NULL;
+        auto_updates_check = NULL;
+        update_link_button = NULL;
         hovered_source_key = -1;
         mouse_leave_tracking = 0;
         hovered_button_id = 0;
@@ -954,7 +1093,7 @@ void ui_show(void)
         AdjustWindowRect(&rect, style, FALSE);
         width = rect.right - rect.left;
         height = rect.bottom - rect.top;
-        settings_window = CreateWindowExW(WS_EX_APPWINDOW, settings_class, L"Offset Pad v" OFFSET_PAD_VERSION,
+        settings_window = CreateWindowExW(WS_EX_APPWINDOW, settings_class, L"Offset Pad v" OFFSET_PAD_VERSION_W,
                                            style,
                                            (GetSystemMetrics(SM_CXSCREEN) - width) / 2,
                                            (GetSystemMetrics(SM_CYSCREEN) - height) / 2,
@@ -1025,6 +1164,13 @@ static void show_tray_menu(void)
 
 void ui_tray_message(LPARAM message)
 {
+    if (LOWORD(message) == NIN_BALLOONUSERCLICK && update_notice_active) {
+        update_notice_active = 0;
+        ShellExecuteW(NULL, L"open", L"https://github.com/OrlandoHsu29/Offset-Pad/releases/latest", NULL, NULL, SW_SHOWNORMAL);
+        return;
+    }
+    if (LOWORD(message) == NIN_BALLOONHIDE || LOWORD(message) == NIN_BALLOONTIMEOUT)
+        update_notice_active = 0;
     UINT event = LOWORD(message);
     if (event == WM_CONTEXTMENU || event == WM_RBUTTONUP)
         show_tray_menu();

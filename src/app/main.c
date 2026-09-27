@@ -4,6 +4,8 @@
 
 #include "app_settings.h"
 #include "app_ui.h"
+#include "app_version.h"
+#include "update_check.h"
 #include "keymap.h"
 
 #define IDI_APP_ICON_LIGHT 101
@@ -36,13 +38,13 @@ static void restart_in_background(void)
 static int launch_background(void)
 {
     wchar_t path[MAX_PATH];
-    wchar_t command[MAX_PATH + 32];
+    wchar_t command[MAX_PATH + 64];
     STARTUPINFOW startup = {0};
     PROCESS_INFORMATION process = {0};
     DWORD length = GetModuleFileNameW(NULL, path, MAX_PATH);
     if (length == 0 || length >= MAX_PATH ||
         swprintf(command, sizeof(command) / sizeof(command[0]),
-                 L"\"%ls\" --background", path) < 0)
+                 L"\"%ls\" --background --skip-update-check", path) < 0)
         return 0;
     startup.cb = sizeof(startup);
     if (!CreateProcessW(path, command, NULL, NULL, FALSE,
@@ -86,6 +88,11 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         return 0;
     case WM_OFFSET_PAD_MODE_REMINDER:
         ui_show_mode_reminder();
+        return 0;
+    case WM_OFFSET_PAD_UPDATE_AVAILABLE:
+        if (settings_load_auto_updates())
+            ui_show_update_available((const wchar_t *)wparam);
+        HeapFree(GetProcessHeap(), 0, (void *)wparam);
         return 0;
     case WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE:
         ui_hotkey_capture_result(wparam);
@@ -134,6 +141,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     DWORD sources[KEYMAP_KEY_COUNT];
     int result;
     int background = wcsstr(GetCommandLineW(), L"--background") != NULL;
+    int skip_update_check = wcsstr(GetCommandLineW(), L"--skip-update-check") != NULL;
     int exit_code = 0;
     (void)previous;
     (void)command_line;
@@ -215,6 +223,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
         exit_code = 1;
         goto cleanup_ui;
     }
+    if (settings_load_auto_updates() && !skip_update_check)
+        update_check_start(main_window, OFFSET_PAD_VERSION_A);
     if (!background)
         ui_show();
     while ((result = GetMessageW(&message, NULL, 0, 0)) > 0) {

@@ -1,0 +1,5 @@
+﻿#ifndef OFFSET_PAD_VERSION_H
+#define OFFSET_PAD_VERSION_H
+#define OFFSET_PAD_VERSION_A "0.2.3"
+#define OFFSET_PAD_VERSION_W L"0.2.3"
+#endif
