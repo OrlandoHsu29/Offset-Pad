@@ -164,7 +164,7 @@ static void paint_settings(HDC dc, const RECT *client)
         keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
                              keymap_get_hold_hotkey());
         swprintf(hint, sizeof(hint) / sizeof(hint[0]),
-                 L"按住 %ls 后切换为小键盘模式", shortcut);
+                 L"按住 %ls 切换为小键盘模式，松手恢复  ", shortcut);
     } else {
         lstrcpynW(hint, L"请先设置一个快捷键",
                   (int)(sizeof(hint) / sizeof(hint[0])));
@@ -316,7 +316,6 @@ static void draw_button(const DRAWITEMSTRUCT *item)
     HDC dc = item->hDC;
     RECT rect = item->rcItem;
     int pressed = (item->itemState & ODS_SELECTED) != 0;
-    int focused = (item->itemState & ODS_FOCUS) != 0;
     COLORREF fill = COLOR_WHITE;
     COLORREF border = COLOR_BORDER;
     COLORREF ink = COLOR_INK;
@@ -328,14 +327,16 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         RECT name_rect = rect;
         RECT value_rect = rect;
         int is_hold = item->CtlID == ID_HOLD_HOTKEY;
+        int capturing = is_hold ? keymap_is_hold_capturing() : keymap_is_capturing();
         fill = pressed ? COLOR_TINT : COLOR_WHITE;
-        rounded_box(dc, rect, fill, focused ? COLOR_ACCENT : COLOR_BORDER, 12);
+        rounded_box(dc, rect, fill,
+                    (pressed || capturing) ? COLOR_ACCENT : COLOR_BORDER, 12);
         name_rect.left += scale(14);
         name_rect.right = name_rect.left + scale(is_hold ? 80 : 92);
         draw_label(dc, is_hold ? L"按住时输入" : L"按下切换模式",
                    name_rect, control_font, COLOR_INK,
                    DT_SINGLELINE | DT_VCENTER);
-        value_rect.left += scale(is_hold ? 100 : 112);
+        value_rect.left += scale(is_hold ? 98 : 112);
         value_rect.right -= scale(14);
         if (is_hold && keymap_is_hold_capturing())
             lstrcpynW(shortcut, L"录入中",
@@ -360,7 +361,7 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         RECT switch_rect = rect;
         RECT knob;
         fill = pressed ? COLOR_TINT : COLOR_WHITE;
-        rounded_box(dc, rect, fill, focused ? COLOR_ACCENT : COLOR_BORDER, 12);
+        rounded_box(dc, rect, fill, pressed ? COLOR_ACCENT : COLOR_BORDER, 12);
         rect.left += scale(14);
         rect.right -= scale(58);
         draw_label(dc, item->CtlID == ID_AUTOSTART ? L"开机时启动" : L"屏蔽字母防误触",
@@ -395,7 +396,7 @@ static void draw_button(const DRAWITEMSTRUCT *item)
         fill = pressed ? COLOR_TINT : COLOR_WHITE;
         label = L"关闭";
     }
-    rounded_box(dc, rect, fill, focused ? COLOR_ACCENT_DOWN : border, 11);
+    rounded_box(dc, rect, fill, border, 11);
     draw_label(dc, label, rect, body_font, ink,
                DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
@@ -492,11 +493,11 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                                               window, (HMENU)(INT_PTR)ID_HOLD_HOTKEY, instance, NULL);
         block_letters_check = CreateWindowExW(0, L"BUTTON", L"屏蔽字母防误触",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                              scale(24), scale(409), scale(200), scale(46),
+                                              scale(24), scale(409), scale(196), scale(46),
                                               window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS, instance, NULL);
         autostart_check = CreateWindowExW(0, L"BUTTON", L"开机时启动",
                                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                           scale(236), scale(409), scale(164), scale(46),
+                                           scale(232), scale(409), scale(168), scale(46),
                                            window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
         toggle_button = CreateWindowExW(0, L"BUTTON", L"开启小键盘",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,

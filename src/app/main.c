@@ -18,9 +18,6 @@ static int restart_background;
 static void set_enabled(int enabled)
 {
     keymap_set_enabled(enabled);
-    if (!settings_save_enabled(keymap_is_latched()))
-        MessageBoxW(main_window, L"无法保存键盘模式；本次运行仍会按当前模式工作。",
-                    L"Offset Pad", MB_OK | MB_ICONERROR);
     ui_refresh();
 }
 
@@ -70,9 +67,6 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_show();
         return 0;
     case WM_OFFSET_PAD_MODE_CHANGED:
-        if (!settings_save_enabled(keymap_is_latched()))
-            MessageBoxW(window, L"无法保存键盘模式；本次运行仍会按当前模式工作。",
-                        L"Offset Pad", MB_OK | MB_ICONERROR);
         ui_refresh();
         return 0;
     case WM_OFFSET_PAD_EFFECTIVE_CHANGED:
@@ -188,7 +182,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
         tray_9_icon = dark_icon;
     definition.lpfnWndProc = main_proc;
     definition.hInstance = instance;
-    definition.hIcon = settings_load_enabled() ? dark_icon : light_icon;
+    definition.hIcon = light_icon;
     definition.lpszClassName = OFFSET_PAD_MAIN_CLASS;
     if (!RegisterClassW(&definition)) {
         exit_code = 1;
@@ -202,7 +196,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     }
     if (settings_load_sources(sources))
         keymap_set_sources(sources);
-    keymap_set_enabled(settings_load_enabled());
+    keymap_set_enabled(0);
     keymap_set_hotkeys_enabled(settings_load_hotkeys_enabled());
     keymap_set_block_letters(settings_load_block_letters());
     keymap_set_hotkey(settings_load_hotkey());

@@ -8,35 +8,6 @@
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define DEFAULT_HOTKEY ((DWORD)((KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT) << 16))
 
-int settings_load_enabled(void)
-{
-    HKEY key;
-    DWORD value = 0;
-    DWORD type = 0;
-    DWORD size = sizeof(value);
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
-        return 0;
-    if (RegQueryValueExW(key, L"NumpadEnabled", NULL, &type, (BYTE *)&value, &size) != ERROR_SUCCESS ||
-        type != REG_DWORD || size != sizeof(value))
-        value = 0;
-    RegCloseKey(key);
-    return value != 0;
-}
-
-int settings_save_enabled(int enabled)
-{
-    HKEY key;
-    DWORD value = enabled != 0;
-    LONG result = RegCreateKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, NULL, 0,
-                                  KEY_SET_VALUE, NULL, &key, NULL);
-    if (result != ERROR_SUCCESS)
-        return 0;
-    result = RegSetValueExW(key, L"NumpadEnabled", 0, REG_DWORD,
-                            (const BYTE *)&value, sizeof(value));
-    RegCloseKey(key);
-    return result == ERROR_SUCCESS;
-}
-
 int settings_load_block_letters(void)
 {
     HKEY key;

@@ -3,8 +3,6 @@
 
 #include "keymap.h"
 
-int settings_load_enabled(void);
-int settings_save_enabled(int enabled);
 int settings_load_hotkeys_enabled(void);
 int settings_save_hotkeys_enabled(int enabled);
 int settings_load_block_letters(void);
