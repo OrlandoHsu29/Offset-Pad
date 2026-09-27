@@ -164,7 +164,7 @@ static void paint_settings(HDC dc, const RECT *client)
         keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
                              keymap_get_hold_hotkey());
         swprintf(hint, sizeof(hint) / sizeof(hint[0]),
-                 L"按住 %ls 切换为小键盘模式，松手恢复  ", shortcut);
+                 L"按住 %ls 时输入数字，松手恢复  ", shortcut);
     } else {
         lstrcpynW(hint, L"请先设置一个快捷键",
                   (int)(sizeof(hint) / sizeof(hint[0])));
@@ -442,7 +442,7 @@ void ui_show_mode_reminder(void)
               (int)(sizeof(data.szInfoTitle) / sizeof(data.szInfoTitle[0])));
     if (keymap_is_latched())
         swprintf(data.szInfo, sizeof(data.szInfo) / sizeof(data.szInfo[0]),
-                 L"当前处于小键盘模式。按 %ls 切回普通键盘。", shortcut);
+                 L"当前已经处于小键盘模式。按 %ls 切回普通键盘。", shortcut);
     else
         lstrcpynW(data.szInfo, L"当前处于临时小键盘模式。松开按住快捷键即可恢复普通键盘。",
                   (int)(sizeof(data.szInfo) / sizeof(data.szInfo[0])));

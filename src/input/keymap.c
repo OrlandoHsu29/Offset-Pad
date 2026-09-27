@@ -77,6 +77,18 @@ static void clear_hotkey_block_if_released(void)
         block_hotkey_until_clear = 0;
 }
 
+static int post_mode_reminder(ULONGLONG now)
+{
+    if (reminder_message == 0 || notify_window == NULL ||
+        (reminder_sent_in_mode && now - reminder_last_sent < REMINDER_COOLDOWN_MS))
+        return 0;
+    if (!PostMessageW(notify_window, reminder_message, 0, 0))
+        return 0;
+    reminder_last_sent = now;
+    reminder_sent_in_mode = 1;
+    return 1;
+}
+
 static void note_unmapped_letter_press(void)
 {
     ULONGLONG now;
@@ -96,10 +108,7 @@ static void note_unmapped_letter_press(void)
     if (reminder_press_count < REMINDER_PRESS_COUNT)
         return;
     reminder_press_count = 0;
-    if (PostMessageW(notify_window, reminder_message, 0, 0)) {
-        reminder_last_sent = now;
-        reminder_sent_in_mode = 1;
-    }
+    post_mode_reminder(now);
 }
 
 static void send_modifier_state(int key_up)
@@ -247,6 +256,8 @@ static void set_hold_active(int value)
     hold_active = value;
     sync_hold_input_layer();
     effective_mode_changed(was_enabled);
+    if (value && was_enabled)
+        post_mode_reminder(GetTickCount64());
     if (effective_changed_message != 0 && notify_window != NULL &&
         was_enabled != keymap_is_enabled())
         PostMessageW(notify_window, effective_changed_message, 0, 0);
