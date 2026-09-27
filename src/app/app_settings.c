@@ -6,7 +6,8 @@
 
 #define PREFS_KEY L"Software\\Offset Pad"
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-#define DEFAULT_HOTKEY ((DWORD)((KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT) << 16))
+#define DEFAULT_HOTKEY ((DWORD)((KEYMAP_MOD_SHIFT << 16) | VK_SPACE))
+#define DEFAULT_HOLD_HOTKEY ((DWORD)(((KEYMAP_MOD_SHIFT | KEYMAP_MOD_CAPS) << 16)))
 
 static DWORD load_dword(const wchar_t *name, DWORD fallback)
 {
@@ -80,7 +81,7 @@ int settings_save_hotkey(keymap_hotkey hotkey)
 
 keymap_hotkey settings_load_hold_hotkey(void)
 {
-    return load_hotkey(L"HoldHotkey", 0);
+    return load_hotkey(L"HoldHotkey", DEFAULT_HOLD_HOTKEY);
 }
 
 int settings_save_hold_hotkey(keymap_hotkey hotkey)

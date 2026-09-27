@@ -9,10 +9,17 @@
 #define KEYMAP_MOD_ALT   2U
 #define KEYMAP_MOD_SHIFT 4U
 #define KEYMAP_MOD_WIN   8U
+#define KEYMAP_MOD_CAPS  16U
 #define KEYMAP_KEY_COUNT 10
+#define KEYMAP_HOLD_RESOLVE_TIMER_ID 0x4F50U
+#define KEYMAP_CAPS_RELEASE_TIMER_ID 0x4F51U
+#define KEYMAP_CAPS_RELEASE_DELAY_MS 50U
+#define KEYMAP_HOLD_RESOLVE_DELAY_MS 500U
 #define KEYMAP_CAPTURE_CANCELED 0
 #define KEYMAP_CAPTURE_SAVED 1
 #define KEYMAP_CAPTURE_INVALID 2
+#define KEYMAP_CAPTURE_INVALID_COUNT 3
+#define KEYMAP_CAPTURE_INVALID_ALT 4
 
 typedef struct keymap_hotkey {
     unsigned int modifiers;
@@ -48,6 +55,7 @@ void keymap_set_hold_capture_message(UINT message);
 void keymap_set_effective_changed_message(UINT message);
 void keymap_set_source_capture_message(UINT message);
 void keymap_set_reminder_message(UINT message);
+void keymap_handle_timer(UINT_PTR timer_id);
 void keymap_begin_source_capture(size_t index);
 int keymap_is_source_capturing(void);
 size_t keymap_capturing_source(void);

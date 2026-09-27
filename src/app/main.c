@@ -66,6 +66,13 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
     case WM_OFFSET_PAD_SHOW:
         ui_show();
         return 0;
+    case WM_TIMER:
+        if ((UINT_PTR)wparam == KEYMAP_HOLD_RESOLVE_TIMER_ID ||
+            (UINT_PTR)wparam == KEYMAP_CAPS_RELEASE_TIMER_ID) {
+            keymap_handle_timer((UINT_PTR)wparam);
+            return 0;
+        }
+        break;
     case WM_OFFSET_PAD_MODE_CHANGED:
     case WM_OFFSET_PAD_EFFECTIVE_CHANGED:
         ui_refresh();
