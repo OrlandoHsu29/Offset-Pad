@@ -25,7 +25,7 @@
 #define MENU_DISABLE_HOTKEYS 205
 #define IDI_APP_ICON_LIGHT 101
 #define IDI_APP_ICON_DARK 102
-#define OFFSET_PAD_VERSION L"0.2.1"
+#define OFFSET_PAD_VERSION L"0.2.3"
 
 static const wchar_t settings_class[] = L"OffsetPadSettingsWindow";
 static HINSTANCE instance;
