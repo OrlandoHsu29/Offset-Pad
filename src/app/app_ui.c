@@ -365,61 +365,9 @@ static void paint_settings(HDC dc, const RECT *client)
 
 static void draw_shortcut_value(HDC dc, const wchar_t *shortcut, RECT rect)
 {
-    wchar_t buffer[96];
-    wchar_t lines[2][96] = {{0}};
-    wchar_t candidate[96];
-    wchar_t *part;
-    int part_count = 0;
-    int line_count;
-    int line_height;
-    int top;
-    int index;
-    int use_compact = 0;
-    SIZE extent;
-    HFONT value_font;
-    HGDIOBJ old_font = SelectObject(dc, small_font != NULL ? small_font :
-                                    GetStockObject(DEFAULT_GUI_FONT));
-    lstrcpynW(buffer, shortcut, (int)(sizeof(buffer) / sizeof(buffer[0])));
-    part = buffer;
-    while (*part != L'\0' && part_count < 5) {
-        wchar_t *separator = wcsstr(part, L" + ");
-        int line = part_count < 2 ? 0 : 1;
-        if (separator != NULL)
-            *separator = L'\0';
-        if (part_count == 0) {
-            lstrcpynW(lines[0], part,
-                      (int)(sizeof(lines[0]) / sizeof(lines[0][0])));
-        } else if (part_count == 2) {
-            swprintf(lines[1], sizeof(lines[1]) / sizeof(lines[1][0]),
-                     L"+ %ls", part);
-        } else {
-            swprintf(candidate, sizeof(candidate) / sizeof(candidate[0]),
-                     L"%ls + %ls", lines[line], part);
-            lstrcpynW(lines[line], candidate,
-                      (int)(sizeof(lines[line]) / sizeof(lines[line][0])));
-        }
-        ++part_count;
-        if (separator == NULL)
-            break;
-        part = separator + 3;
-    }
-    line_count = part_count > 2 ? 2 : 1;
-    for (index = 0; index < line_count; ++index) {
-        GetTextExtentPoint32W(dc, lines[index], (int)wcslen(lines[index]),
-                              &extent);
-        if (extent.cx > rect.right - rect.left)
-            use_compact = 1;
-    }
-    SelectObject(dc, old_font);
-    value_font = use_compact && compact_font != NULL ? compact_font : small_font;
-    line_height = scale(15);
-    top = rect.top + (rect.bottom - rect.top - line_count * line_height) / 2;
-    for (index = 0; index < line_count; ++index) {
-        RECT line_rect = {rect.left, top + index * line_height,
-                          rect.right, top + (index + 1) * line_height};
-        draw_label(dc, lines[index], line_rect, value_font, COLOR_MUTED,
-                   DT_SINGLELINE | DT_RIGHT | DT_VCENTER | DT_END_ELLIPSIS);
-    }
+    draw_label(dc, shortcut, rect, compact_font != NULL ? compact_font : small_font,
+               COLOR_MUTED,
+               DT_SINGLELINE | DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS);
 }
 
 static void draw_setting_card(const DRAWITEMSTRUCT *item)
@@ -448,6 +396,11 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
 
     if (item->CtlID == ID_HOTKEY || item->CtlID == ID_HOLD_HOTKEY) {
         wchar_t shortcut[96];
+        wchar_t title[64];
+        wchar_t *separator;
+        wchar_t *tag = NULL;
+        SIZE title_extent = {0};
+        SIZE tag_extent = {0};
         RECT name_rect = rect;
         RECT value_rect = rect;
         int is_hold = item->CtlID == ID_HOLD_HOTKEY;
@@ -455,13 +408,39 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         fill = pressed ? COLOR_TINT : (hovered ? COLOR_HOVER : COLOR_WHITE);
         rounded_box(dc, rect, fill,
                     (pressed || capturing) ? COLOR_ACCENT : COLOR_BORDER, 12);
-        name_rect.left += scale(14);
-        name_rect.right = name_rect.left + scale(is_hold ? 80 : 92);
-        draw_label(dc, is_hold ? L"按住时输入" : L"按下切换模式",
-                   name_rect, control_font, COLOR_INK,
-                   DT_SINGLELINE | DT_VCENTER);
-        value_rect.left += scale(is_hold ? 98 : 110);
-        value_rect.right -= scale(is_hold ? 14 : 12);
+        name_rect.left += scale(12);
+        name_rect.right -= scale(12);
+        name_rect.top += scale(5);
+        name_rect.bottom = name_rect.top + scale(18);
+        GetWindowTextW(item->hwndItem, title,
+                       (int)(sizeof(title) / sizeof(title[0])));
+        separator = wcschr(title, (wchar_t)0x00B7);
+        if (separator != NULL) {
+            *separator = L'\0';
+            tag = separator + 1;
+            while (*tag == L' ')
+                ++tag;
+        }
+        draw_label(dc, title, name_rect, control_font, COLOR_INK,
+                   DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+        if (tag != NULL) {
+            HGDIOBJ old_font = SelectObject(dc, control_font);
+            GetTextExtentPoint32W(dc, title, (int)wcslen(title), &title_extent);
+            GetTextExtentPoint32W(dc, L"· ", 2, &tag_extent);
+            SelectObject(dc, old_font);
+            name_rect.left += title_extent.cx;
+            name_rect.right = name_rect.left + tag_extent.cx;
+            draw_label(dc, L"· ", name_rect, control_font, COLOR_MUTED,
+                       DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+            name_rect.left += tag_extent.cx;
+            name_rect.right = rect.right - scale(12);
+            draw_label(dc, tag, name_rect, control_font, COLOR_MUTED,
+                       DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+        }
+        value_rect.left += scale(12);
+        value_rect.right -= scale(12);
+        value_rect.top += scale(24);
+        value_rect.bottom -= scale(5);
         if (is_hold && keymap_is_hold_capturing())
             lstrcpynW(shortcut, L"录入中",
                       (int)(sizeof(shortcut) / sizeof(shortcut[0])));
@@ -664,11 +643,11 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
 {
     switch (message) {
     case WM_CREATE:
-        hotkey_button = CreateWindowExW(0, L"BUTTON", L"按下切换模式",
+        hotkey_button = CreateWindowExW(0, L"BUTTON", L"按下切换模式 · 快捷键",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                          scale(24), scale(353), scale(188), scale(46),
                                          window, (HMENU)(INT_PTR)ID_HOTKEY, instance, NULL);
-        hold_hotkey_button = CreateWindowExW(0, L"BUTTON", L"按住输入",
+        hold_hotkey_button = CreateWindowExW(0, L"BUTTON", L"按住输入 · 快捷键",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                               scale(224), scale(353), scale(176), scale(46),
                                               window, (HMENU)(INT_PTR)ID_HOLD_HOTKEY, instance, NULL);
