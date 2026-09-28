@@ -6,7 +6,8 @@
 
 #define PREFS_KEY L"Software\\Offset Pad"
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-#define DEFAULT_HOTKEY ((DWORD)(((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16)))
+#define DEFAULT_HOTKEY ((DWORD)(((KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16)))
+#define LEGACY_DEFAULT_HOTKEY ((DWORD)(((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16)))
 #define DEFAULT_HOLD_HOTKEY ((DWORD)(KEYMAP_MOD_CAPS << 16))
 
 static DWORD load_dword(const wchar_t *name, DWORD fallback)
@@ -79,14 +80,31 @@ int settings_save_auto_updates(int enabled)
     return save_dword(L"AutoUpdates", enabled != 0);
 }
 
+keymap_hotkey settings_default_hotkey(void)
+{
+    keymap_hotkey value = {DEFAULT_HOTKEY >> 16, DEFAULT_HOTKEY & 0xFFFFU};
+    return value;
+}
+
 keymap_hotkey settings_load_hotkey(void)
 {
-    return load_hotkey(L"ToggleHotkey", DEFAULT_HOTKEY);
+    DWORD stored = load_dword(L"ToggleHotkey", DEFAULT_HOTKEY);
+    if (stored == LEGACY_DEFAULT_HOTKEY) {
+        stored = DEFAULT_HOTKEY;
+        save_dword(L"ToggleHotkey", stored);
+    }
+    return (keymap_hotkey){stored >> 16, stored & 0xFFFFU};
 }
 
 int settings_save_hotkey(keymap_hotkey hotkey)
 {
     return save_hotkey(L"ToggleHotkey", hotkey);
+}
+
+keymap_hotkey settings_default_hold_hotkey(void)
+{
+    keymap_hotkey value = {DEFAULT_HOLD_HOTKEY >> 16, DEFAULT_HOLD_HOTKEY & 0xFFFFU};
+    return value;
 }
 
 keymap_hotkey settings_load_hold_hotkey(void)

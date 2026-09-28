@@ -181,14 +181,30 @@ int main(void)
 {
     keymap_hotkey hotkey;
     DWORD malformed = 1;
+    DWORD legacy_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16;
 
     ZeroMemory(values, sizeof(values));
     assert(settings_load_block_letters());
     assert(settings_load_hotkeys_enabled());
+    assert(settings_default_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
+    assert(settings_default_hold_hotkey().modifiers == KEYMAP_MOD_CAPS);
 
     hotkey = settings_load_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
     assert(hotkey.key == 0);
+
+    set_raw_value(L"ToggleHotkey", REG_DWORD,
+                  (const BYTE *)&legacy_hotkey, sizeof(legacy_hotkey));
+    hotkey = settings_load_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
+    assert(hotkey.key == 0);
+    {
+        test_value *saved = find_value(L"ToggleHotkey");
+        DWORD persisted;
+        assert(saved != NULL && saved->size == sizeof(persisted));
+        memcpy(&persisted, saved->data, sizeof(persisted));
+        assert(persisted == ((KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16));
+    }
     hotkey = settings_load_hold_hotkey();
     assert(hotkey.modifiers == KEYMAP_MOD_CAPS);
     assert(hotkey.key == 0);
@@ -226,8 +242,21 @@ int main(void)
     assert(settings_load_hotkeys_enabled());
     set_raw_value(L"ToggleHotkey", REG_SZ, (const BYTE *)&malformed, sizeof(malformed));
     hotkey = settings_load_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
     assert(hotkey.key == 0);
+
+    set_raw_value(L"ToggleHotkey", REG_DWORD,
+                  (const BYTE *)&legacy_hotkey, sizeof(legacy_hotkey));
+    hotkey = settings_load_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
+    assert(hotkey.key == 0);
+    {
+        test_value *saved = find_value(L"ToggleHotkey");
+        DWORD persisted;
+        assert(saved != NULL && saved->size == sizeof(persisted));
+        memcpy(&persisted, saved->data, sizeof(persisted));
+        assert(persisted == ((KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16));
+    }
     set_raw_value(L"HoldHotkey", REG_DWORD, (const BYTE *)&malformed, sizeof(malformed) + 1);
     hotkey = settings_load_hold_hotkey();
     assert(hotkey.modifiers == KEYMAP_MOD_CAPS);

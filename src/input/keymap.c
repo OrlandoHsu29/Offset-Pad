@@ -92,7 +92,7 @@ static int hold_modifiers_suspended;
 static int backspace_synthetic_down;
 static unsigned char hold_swallowed_keys[32];
 static unsigned char passed_keys[32];
-static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0};
+static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT, 0};
 static keymap_hotkey hold_hotkey = {KEYMAP_MOD_CAPS, 0};
 static int hold_provisional;
 static int hold_timer_active;
