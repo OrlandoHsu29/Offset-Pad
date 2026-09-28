@@ -73,17 +73,17 @@ static hover_button hover_buttons[7];
 
 static HICON current_icon(void)
 {
-    return keymap_is_enabled() ? dark_icon : light_icon;
+    return keymap_is_visual_enabled() ? dark_icon : light_icon;
 }
 
 static HICON current_tray_icon(void)
 {
-    return keymap_is_enabled() ? tray_9_icon : tray_o_icon;
+    return keymap_is_visual_enabled() ? tray_9_icon : tray_o_icon;
 }
 
 static HICON current_logo(void)
 {
-    HICON logo = keymap_is_enabled() ? dark_logo : light_logo;
+    HICON logo = keymap_is_visual_enabled() ? dark_logo : light_logo;
     return logo != NULL ? logo : current_icon();
 }
 
@@ -314,7 +314,7 @@ static void paint_settings(HDC dc, const RECT *client)
     rect = scaled_rect(24, 89, 400, 164);
     rounded_box(dc, rect, COLOR_TINT, COLOR_TINT, 14);
     rect = scaled_rect(43, 103, 332, 130);
-    draw_label(dc, keymap_is_enabled() ? L"数字小键盘已开启" : L"当前为普通键盘模式",
+    draw_label(dc, keymap_is_visual_enabled() ? L"数字小键盘已开启" : L"当前为普通键盘模式",
                rect, heading_font, COLOR_INK, DT_SINGLELINE | DT_VCENTER);
     rect = scaled_rect(43, 131, 386, 150);
     draw_label(dc, hint, rect, small_font,
@@ -564,7 +564,7 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         return;
     }
     if (item->CtlID == ID_MODE_BADGE) {
-        int enabled = keymap_is_enabled();
+        int enabled = keymap_is_visual_enabled();
         const wchar_t *label = enabled ? L"ON" : L"OFF";
         if (enabled) {
             fill = pressed ? COLOR_ACCENT_DOWN :
@@ -738,7 +738,7 @@ void ui_refresh(void)
         SendMessageW(settings_window, WM_SETICON, ICON_BIG, (LPARAM)current_logo());
     }
     if (mode_badge_button != NULL) {
-        SetWindowTextW(mode_badge_button, keymap_is_enabled() ? L"ON" : L"OFF");
+        SetWindowTextW(mode_badge_button, keymap_is_visual_enabled() ? L"ON" : L"OFF");
         InvalidateRect(mode_badge_button, NULL, FALSE);
     }
     if (autostart_check != NULL)
@@ -803,7 +803,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                         (update_available ? WS_VISIBLE : 0),
                         header_update_button_left(), scale(23), scale(24), scale(24),
                         window, (HMENU)(INT_PTR)ID_UPDATE_LINK, instance, NULL);
-        mode_badge_button = CreateWindowExW(0, L"BUTTON", keymap_is_enabled() ? L"ON" : L"OFF",
+        mode_badge_button = CreateWindowExW(0, L"BUTTON", keymap_is_visual_enabled() ? L"ON" : L"OFF",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                         scale(341), scale(112), scale(40), scale(25),
                         window, (HMENU)(INT_PTR)ID_MODE_BADGE, instance, NULL);

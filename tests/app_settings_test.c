@@ -187,10 +187,10 @@ int main(void)
     assert(settings_load_hotkeys_enabled());
 
     hotkey = settings_load_hotkey();
-    assert(hotkey.modifiers == KEYMAP_MOD_SHIFT);
-    assert(hotkey.key == VK_SPACE);
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(hotkey.key == 0);
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_SHIFT | KEYMAP_MOD_CAPS));
+    assert(hotkey.modifiers == KEYMAP_MOD_CAPS);
     assert(hotkey.key == 0);
 
     assert(settings_save_block_letters(0));
@@ -226,11 +226,11 @@ int main(void)
     assert(settings_load_hotkeys_enabled());
     set_raw_value(L"ToggleHotkey", REG_SZ, (const BYTE *)&malformed, sizeof(malformed));
     hotkey = settings_load_hotkey();
-    assert(hotkey.modifiers == KEYMAP_MOD_SHIFT);
-    assert(hotkey.key == VK_SPACE);
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(hotkey.key == 0);
     set_raw_value(L"HoldHotkey", REG_DWORD, (const BYTE *)&malformed, sizeof(malformed) + 1);
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_SHIFT | KEYMAP_MOD_CAPS));
+    assert(hotkey.modifiers == KEYMAP_MOD_CAPS);
     assert(hotkey.key == 0);
 
     assert(settings_save_hotkeys_enabled(1));

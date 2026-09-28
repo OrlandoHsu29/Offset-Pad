@@ -34,6 +34,15 @@ typedef enum capture_mode {
     CAPTURE_SOURCE_KEY
 } capture_mode;
 
+typedef enum caps_press_action {
+    CAPS_PRESS_IDLE,
+    CAPS_PRESS_PENDING,
+    CAPS_PRESS_OTHER,
+    CAPS_PRESS_HOLD,
+    CAPS_PRESS_TOGGLE_PASSED,
+    CAPS_PRESS_TOGGLE_SWALLOWED
+} caps_press_action;
+
 typedef enum caps_restore_phase {
     CAPS_RESTORE_IDLE,       /* No Caps press is being tracked. */
     CAPS_RESTORE_ARMED,      /* Caps down reached Windows. */
@@ -81,13 +90,26 @@ static int hold_modifiers_suspended;
 static int backspace_synthetic_down;
 static unsigned char hold_swallowed_keys[32];
 static unsigned char passed_keys[32];
-static keymap_hotkey hotkey = {KEYMAP_MOD_SHIFT, VK_SPACE};
-static keymap_hotkey hold_hotkey = {KEYMAP_MOD_SHIFT | KEYMAP_MOD_CAPS, 0};
+static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0};
+static keymap_hotkey hold_hotkey = {KEYMAP_MOD_CAPS, 0};
 static int hold_provisional;
 static int hold_timer_active;
 static int hold_provisional_was_latched;
 static int hold_suppressed_until_release;
 static caps_restore_phase caps_restore;
+static caps_press_action caps_action;
+static int caps_preview_active;
+static int caps_preview_timer_active;
+
+typedef struct shortcut_compensation {
+    DWORD key;
+    unsigned int trigger_key;
+    unsigned int modifiers;
+    int pending;
+    int timer_active;
+} shortcut_compensation;
+
+static shortcut_compensation shift_compensation;
 
 static void release_mapped_keys(void);
 
@@ -265,6 +287,113 @@ static int hotkey_uses_caps(keymap_hotkey shortcut)
     return (shortcut.modifiers & KEYMAP_MOD_CAPS) != 0;
 }
 
+static int hotkey_uses_shift(keymap_hotkey shortcut)
+{
+    return (shortcut.modifiers & KEYMAP_MOD_SHIFT_ANY) != 0;
+}
+
+static int any_hotkey_uses_shift(void)
+{
+    return hotkey_uses_shift(hotkey) || hotkey_uses_shift(hold_hotkey);
+}
+
+static void notify_visual_mode_changed(void)
+{
+    if (effective_changed_message != 0 && notify_window != NULL)
+        PostMessageW(notify_window, effective_changed_message, 0, 0);
+}
+
+static void cancel_caps_preview(void)
+{
+    if (caps_preview_timer_active && notify_window != NULL)
+        KillTimer(notify_window, KEYMAP_CAPS_PREVIEW_TIMER_ID);
+    caps_preview_timer_active = 0;
+    if (!caps_preview_active)
+        return;
+    caps_preview_active = 0;
+    notify_visual_mode_changed();
+}
+
+static void start_caps_preview_timer(void)
+{
+    if (caps_preview_active || caps_preview_timer_active || notify_window == NULL)
+        return;
+    caps_preview_timer_active =
+        SetTimer(notify_window, KEYMAP_CAPS_PREVIEW_TIMER_ID,
+                 KEYMAP_CAPS_PREVIEW_DELAY_MS, NULL) != 0;
+}
+
+static void clear_shift_compensation(void)
+{
+    if (shift_compensation.timer_active && notify_window != NULL)
+        KillTimer(notify_window, KEYMAP_COMPENSATION_TIMER_ID);
+    ZeroMemory(&shift_compensation, sizeof(shift_compensation));
+}
+
+static void remember_shift_key(int modifier)
+{
+    if (modifier < 4 || modifier > 5 || !hotkeys_enabled ||
+        !any_hotkey_uses_shift() || shift_compensation.key != 0)
+        return;
+    shift_compensation.key = modifier_keys[modifier];
+}
+
+static void mark_shift_compensation_needed(keymap_hotkey shortcut)
+{
+    if (hotkey_uses_shift(shortcut) && shift_compensation.key != 0 &&
+        !shift_compensation.pending) {
+        shift_compensation.modifiers = shortcut.modifiers;
+        shift_compensation.trigger_key = shortcut.key;
+        shift_compensation.pending = 1;
+    }
+}
+
+static int shortcut_modifiers_released(unsigned int active, unsigned int required)
+{
+    unsigned int required_ctrl = required & KEYMAP_MOD_CTRL_ANY;
+    unsigned int required_alt = required & KEYMAP_MOD_ALT_ANY;
+    unsigned int required_shift = required & KEYMAP_MOD_SHIFT_ANY;
+    unsigned int required_win = required & KEYMAP_MOD_WIN_ANY;
+    if ((required_ctrl && (active & KEYMAP_MOD_CTRL_SIDES)) ||
+        (required_alt && (active & KEYMAP_MOD_ALT_SIDES)) ||
+        (required_shift && (active & KEYMAP_MOD_SHIFT_SIDES)) ||
+        (required_win && (active & KEYMAP_MOD_WIN_SIDES)))
+        return 0;
+    return !(required & KEYMAP_MOD_CAPS) || !(active & KEYMAP_MOD_CAPS);
+}
+
+static void complete_shift_compensation(void)
+{
+    INPUT input[2] = {{0}};
+    DWORD key;
+    if (!shift_compensation.pending || shift_compensation.key == 0)
+        return;
+    if (notify_window != NULL)
+        KillTimer(notify_window, KEYMAP_COMPENSATION_TIMER_ID);
+    key = shift_compensation.key;
+    input[0].type = INPUT_KEYBOARD;
+    input[0].ki.wVk = (WORD)key;
+    input[1] = input[0];
+    input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    ZeroMemory(&shift_compensation, sizeof(shift_compensation));
+    SendInput(2, input, sizeof(input[0]));
+}
+
+static void try_shift_compensation_after_release(void)
+{
+    if (!shift_compensation.pending || shift_compensation.timer_active ||
+        (shift_compensation.trigger_key != 0 && (hotkey_key_down || hold_key_down)) ||
+        !shortcut_modifiers_released(active_modifiers(), shift_compensation.modifiers))
+        return;
+    shift_compensation.timer_active = 1;
+    if (notify_window == NULL ||
+        SetTimer(notify_window, KEYMAP_COMPENSATION_TIMER_ID,
+                 KEYMAP_COMPENSATION_DELAY_MS, NULL) == 0) {
+        shift_compensation.timer_active = 0;
+        complete_shift_compensation();
+    }
+}
+
 static int any_hotkey_uses_caps(void)
 {
     return hotkey_uses_caps(hotkey) || hotkey_uses_caps(hold_hotkey);
@@ -310,6 +439,19 @@ static void complete_caps_restore(void)
     caps_restore = CAPS_RESTORE_IDLE;
     restore_caps_lock_after_release();
 }
+
+static int caps_hold_key_enabled(void)
+{
+    return hold_hotkey.key == 0 && hold_hotkey.modifiers == KEYMAP_MOD_CAPS;
+}
+
+static int is_character_key(DWORD key)
+{
+    return (key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9') ||
+           key == VK_SPACE || (key >= VK_NUMPAD0 && key <= VK_DIVIDE) ||
+           (key >= VK_OEM_1 && key <= VK_OEM_8) || key == VK_OEM_102;
+}
+
 
 static int caps_press_was_passed(void)
 {
@@ -470,8 +612,11 @@ static void set_hold_active_internal(int value, int show_reminder)
     value = value != 0;
     if (hold_active == value)
         return;
-    if (value)
+    if (value) {
+        cancel_caps_preview();
         mark_caps_restore_needed(hold_hotkey);
+        mark_shift_compensation_needed(hold_hotkey);
+    }
     hold_active = value;
     sync_hold_input_layer();
     effective_mode_changed(was_enabled);
@@ -539,6 +684,7 @@ void keymap_set_hotkeys_enabled(int value)
     chord_down = 0;
     block_hotkey_until_clear = 1;
     if (!hotkeys_enabled) {
+        cancel_caps_preview();
         clear_hold_provisional();
         hold_suppressed_until_release = 0;
         set_hold_active(0);
@@ -554,6 +700,7 @@ int keymap_hotkeys_enabled(void)
 void keymap_set_enabled(int value)
 {
     int was_enabled = keymap_is_enabled();
+    cancel_caps_preview();
     enabled = value != 0;
     effective_mode_changed(was_enabled);
 }
@@ -561,6 +708,11 @@ void keymap_set_enabled(int value)
 int keymap_is_enabled(void)
 {
     return enabled || hold_active;
+}
+
+int keymap_is_visual_enabled(void)
+{
+    return keymap_is_enabled() || caps_preview_active;
 }
 
 int keymap_is_latched(void)
@@ -743,6 +895,12 @@ static int hotkey_valid(keymap_hotkey value)
     return validate_hotkey(value) == KEYMAP_CAPTURE_SAVED;
 }
 
+static int hold_hotkey_valid(keymap_hotkey value)
+{
+    return (value.modifiers == KEYMAP_MOD_CAPS && value.key == 0) ||
+           hotkey_valid(value);
+}
+
 static int same_hotkey(keymap_hotkey left, keymap_hotkey right)
 {
     return left.key == right.key &&
@@ -773,8 +931,8 @@ keymap_hotkey keymap_get_hotkey(void)
 void keymap_set_hold_hotkey(keymap_hotkey value)
 {
     if ((value.modifiers != 0 || value.key != 0) &&
-        (!hotkey_valid(value) || same_hotkey(value, hotkey))) {
-        value.modifiers = KEYMAP_MOD_SHIFT | KEYMAP_MOD_CAPS;
+        (!hold_hotkey_valid(value) || same_hotkey(value, hotkey))) {
+        value.modifiers = KEYMAP_MOD_CAPS;
         value.key = 0;
         if (same_hotkey(value, hotkey)) {
             value.modifiers = 0;
@@ -973,7 +1131,9 @@ static void finish_capture(keymap_hotkey value)
 {
     int is_hold = capture == CAPTURE_HOLD_HOTKEY;
     int empty = value.modifiers == 0 && value.key == 0;
-    int result = empty ? KEYMAP_CAPTURE_SAVED : validate_hotkey(value);
+    int result = empty ? KEYMAP_CAPTURE_SAVED :
+                  (is_hold && value.modifiers == KEYMAP_MOD_CAPS && value.key == 0 ?
+                   KEYMAP_CAPTURE_SAVED : validate_hotkey(value));
     UINT message = is_hold ? hold_capture_message : capture_message;
     if (result == KEYMAP_CAPTURE_SAVED && !empty &&
         (is_hold ? same_hotkey(value, hotkey) :
@@ -1038,6 +1198,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     int hold_swallowed;
     int caps_key_was_passed;
     int caps_shortcut_triggered = 0;
+    int shift_shortcut_triggered = 0;
 
     unsigned int mask;
     size_t index;
@@ -1053,6 +1214,38 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
 
     released = message == WM_KEYUP || message == WM_SYSKEYUP;
     modifier = modifier_index(event);
+    if (modifier == CAPS_MODIFIER_INDEX && caps_action != CAPS_PRESS_IDLE) {
+        if (!released)
+            return 1;
+        if (caps_action == CAPS_PRESS_TOGGLE_SWALLOWED) {
+            cancel_caps_preview();
+            modifiers[CAPS_MODIFIER_INDEX] = 0;
+            caps_action = CAPS_PRESS_IDLE;
+            chord_down = 0;
+            try_shift_compensation_after_release();
+            return 1;
+        }
+        cancel_caps_preview();
+        if (caps_action == CAPS_PRESS_HOLD)
+            set_hold_active(0);
+        caps_action = CAPS_PRESS_IDLE;
+    }
+    if (modifier == CAPS_MODIFIER_INDEX && !released && hotkeys_enabled &&
+        capture == CAPTURE_NONE && !captured_modifiers[CAPS_MODIFIER_INDEX] &&
+        caps_hold_key_enabled()) {
+        modifiers[CAPS_MODIFIER_INDEX] = 1;
+        if (modifiers_equal(active_modifiers(), hotkey.modifiers)) {
+            caps_action = CAPS_PRESS_TOGGLE_SWALLOWED;
+            chord_down = 1;
+            mark_shift_compensation_needed(hotkey);
+            keymap_set_enabled(!enabled);
+            PostMessageW(notify_window, changed_message, 0, 0);
+            return 1;
+        }
+        /* Keep the real layer off until a character key is pressed. */
+        caps_action = CAPS_PRESS_PENDING;
+        start_caps_preview_timer();
+    }
     if (modifier == CAPS_MODIFIER_INDEX && !released &&
         caps_restore == CAPS_RESTORE_TIMER)
         complete_caps_restore();
@@ -1064,6 +1257,9 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         !hold_key_is_swallowed(VK_CAPITAL))
         return CallNextHookEx(hook, code, message, parameter);
     if (modifier >= 0) {
+        if ((modifier == 4 || modifier == 5) && !released &&
+            capture == CAPTURE_NONE && !keymap_is_source_capturing())
+            remember_shift_key(modifier);
         sync_modifier_state_from_os(modifier);
         was_hold_suspended = hold_modifiers_suspended;
         caps_key_was_passed = modifier == CAPS_MODIFIER_INDEX && released &&
@@ -1071,6 +1267,25 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         hold_swallowed = released ? hold_swallow_key(event->vkCode, 1) : 0;
         modifiers[modifier] = !released;
         mask = active_modifiers();
+        if (released)
+            try_shift_compensation_after_release();
+        if (caps_hold_key_enabled() &&
+            (caps_action == CAPS_PRESS_PENDING || caps_action == CAPS_PRESS_OTHER) &&
+            !released && modifier != CAPS_MODIFIER_INDEX &&
+            !((modifier == 4 || modifier == 5) &&
+              modifiers_equal(mask, hotkey.modifiers))) {
+            caps_action = CAPS_PRESS_OTHER;
+            cancel_caps_preview();
+        }
+        if (caps_hold_key_enabled() && caps_action == CAPS_PRESS_HOLD &&
+            !released && (modifier == 4 || modifier == 5) &&
+            modifiers_equal(mask, hotkey.modifiers)) {
+            set_hold_active(0);
+            caps_action = CAPS_PRESS_TOGGLE_PASSED;
+            chord_down = 1;
+            keymap_set_enabled(!enabled);
+            PostMessageW(notify_window, changed_message, 0, 0);
+        }
         if (caps_key_was_passed && capture != CAPTURE_NONE) {
             clear_hotkey_block_if_released();
             return pass_caps_key_up(code, message, parameter);
@@ -1118,7 +1333,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 set_hold_active(0);
             }
         }
-        if (!hold_provisional) {
+        if (!hold_provisional && caps_action == CAPS_PRESS_IDLE) {
             if (hold_hotkey.key == 0) {
                 int should_hold = hotkeys_enabled && hold_hotkey.modifiers != 0 &&
                                   modifiers_equal(mask, hold_hotkey.modifiers) &&
@@ -1150,19 +1365,36 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 } else {
                     keymap_set_enabled(!enabled);
                 }
+                if ((modifier == 4 || modifier == 5) && !released &&
+                    caps_action == CAPS_PRESS_PENDING &&
+                    (hotkey.modifiers & KEYMAP_MOD_CAPS) != 0) {
+                    /* Caps was already passed through; swallow Shift completing the chord. */
+                    shift_shortcut_triggered = 1;
+                    clear_shift_compensation();
+                }
+                if (caps_hold_key_enabled() &&
+                    (caps_action == CAPS_PRESS_PENDING || caps_action == CAPS_PRESS_OTHER))
+                    caps_action = CAPS_PRESS_TOGGLE_PASSED;
                 if ((hotkey.modifiers & KEYMAP_MOD_CAPS) != 0) {
                     mark_caps_restore_needed(hotkey);
                     if (modifier == CAPS_MODIFIER_INDEX && !released)
                         caps_shortcut_triggered = 1;
                 }
+                if (!shift_shortcut_triggered)
+                    mark_shift_compensation_needed(hotkey);
                 PostMessageW(notify_window, changed_message, 0, 0);
             }
         }
         if (caps_key_was_passed) {
+            try_shift_compensation_after_release();
             return pass_caps_key_up(code, message, parameter);
         }
         if (caps_shortcut_triggered) {
             captured_modifiers[CAPS_MODIFIER_INDEX] = 1;
+            return 1;
+        }
+        if (shift_shortcut_triggered) {
+            captured_modifiers[modifier] = 1;
             return 1;
         }
         if (hold_swallowed || was_hold_suspended || hold_modifiers_suspended ||
@@ -1175,9 +1407,26 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             hotkeys_enabled && any_hotkey_uses_caps()) {
             caps_restore = CAPS_RESTORE_ARMED;
         }
+        try_shift_compensation_after_release();
+        if ((modifier == 4 || modifier == 5) && released &&
+            !shift_compensation.pending &&
+            !(active_modifiers() & KEYMAP_MOD_SHIFT_SIDES))
+            clear_shift_compensation();
         return CallNextHookEx(hook, code, message, parameter);
     }
 
+    if (caps_hold_key_enabled() &&
+        (caps_action == CAPS_PRESS_PENDING || caps_action == CAPS_PRESS_OTHER) &&
+        !released) {
+        caps_action = CAPS_PRESS_OTHER;
+        cancel_caps_preview();
+        if (is_character_key(event->vkCode) &&
+            !(active_modifiers() & (KEYMAP_MOD_CTRL_ANY | KEYMAP_MOD_ALT_ANY |
+                                    KEYMAP_MOD_WIN_ANY))) {
+            caps_action = CAPS_PRESS_HOLD;
+            set_hold_active(1);
+        }
+    }
     if (hold_provisional) {
         if (hotkeys_enabled && !block_hotkey_until_clear && hold_active &&
             modifiers_contain(active_modifiers(), hold_hotkey.modifiers)) {
@@ -1261,6 +1510,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             if (released) {
                 hold_key_down = 0;
                 set_hold_active(0);
+                try_shift_compensation_after_release();
             }
             return 1;
         }
@@ -1273,14 +1523,17 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     }
     if (hotkey.key != 0 && event->vkCode == hotkey.key) {
         if (hotkey_key_down) {
-            if (released)
+            if (released) {
                 hotkey_key_down = 0;
+                try_shift_compensation_after_release();
+            }
             return 1;
         }
         if (hotkeys_enabled && !hold_active && !released &&
             !block_hotkey_until_clear && modifiers_equal(active_modifiers(), hotkey.modifiers)) {
             hotkey_key_down = 1;
             mark_caps_restore_needed(hotkey);
+            mark_shift_compensation_needed(hotkey);
             keymap_set_enabled(!enabled);
             PostMessageW(notify_window, changed_message, 0, 0);
             return 1;
@@ -1343,6 +1596,23 @@ int keymap_install(HINSTANCE instance, HWND window, UINT message)
 
 void keymap_handle_timer(UINT_PTR timer_id)
 {
+    if (timer_id == KEYMAP_CAPS_PREVIEW_TIMER_ID) {
+        if (notify_window != NULL)
+            KillTimer(notify_window, KEYMAP_CAPS_PREVIEW_TIMER_ID);
+        caps_preview_timer_active = 0;
+        if (caps_action == CAPS_PRESS_PENDING &&
+            modifiers[CAPS_MODIFIER_INDEX] && hotkeys_enabled &&
+            caps_hold_key_enabled() && !keymap_is_enabled()) {
+            caps_preview_active = 1;
+            notify_visual_mode_changed();
+        }
+        return;
+    }
+    if (timer_id == KEYMAP_COMPENSATION_TIMER_ID) {
+        shift_compensation.timer_active = 0;
+        complete_shift_compensation();
+        return;
+    }
     if (timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID) {
         complete_caps_restore();
         return;
@@ -1360,6 +1630,8 @@ void keymap_handle_timer(UINT_PTR timer_id)
 
 void keymap_uninstall(void)
 {
+    cancel_caps_preview();
+    clear_shift_compensation();
     if (caps_restore == CAPS_RESTORE_TIMER)
         complete_caps_restore();
     else

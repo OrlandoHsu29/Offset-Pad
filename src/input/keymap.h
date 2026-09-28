@@ -35,6 +35,10 @@ _Static_assert(KEYMAP_MOD_ALL <= 0xFFFFU, "modifier flags must fit persisted DWO
 #define KEYMAP_HOLD_RESOLVE_TIMER_ID 0x4F50U
 #define KEYMAP_CAPS_RELEASE_TIMER_ID 0x4F51U
 #define KEYMAP_CAPS_RELEASE_DELAY_MS 50U
+#define KEYMAP_CAPS_PREVIEW_TIMER_ID 0x4F53U
+#define KEYMAP_CAPS_PREVIEW_DELAY_MS 250U
+#define KEYMAP_COMPENSATION_TIMER_ID 0x4F52U
+#define KEYMAP_COMPENSATION_DELAY_MS 50U
 #define KEYMAP_HOLD_RESOLVE_DELAY_MS 500U
 #define KEYMAP_CAPTURE_CANCELED 0
 #define KEYMAP_CAPTURE_SAVED 1
@@ -51,6 +55,7 @@ int keymap_install(HINSTANCE instance, HWND notify_window, UINT changed_message)
 void keymap_uninstall(void);
 void keymap_set_enabled(int enabled);
 int keymap_is_enabled(void);
+int keymap_is_visual_enabled(void);
 int keymap_is_latched(void);
 void keymap_set_hotkeys_enabled(int enabled);
 int keymap_hotkeys_enabled(void);
