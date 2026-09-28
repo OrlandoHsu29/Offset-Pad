@@ -28,6 +28,8 @@ __declspec(dllimport) int WINAPI GdipDeletePath(GpPath *path);
 __declspec(dllimport) int WINAPI GdipAddPathArc(GpPath *path, float x, float y,
                                                 float width, float height,
                                                 float start_angle, float sweep_angle);
+__declspec(dllimport) int WINAPI GdipAddPathLine(GpPath *path, float x1, float y1,
+                                                 float x2, float y2);
 __declspec(dllimport) int WINAPI GdipClosePathFigure(GpPath *path);
 __declspec(dllimport) int WINAPI GdipCreateSolidFill(DWORD color, GpSolidFill **brush);
 __declspec(dllimport) int WINAPI GdipDeleteBrush(GpBrush *brush);
@@ -122,5 +124,89 @@ void rounded_box_draw(HDC dc, RECT rect, COLORREF fill, COLORREF outline,
         SelectObject(dc, old_brush);
         DeleteObject(fallback_pen);
         DeleteObject(fallback_brush);
+    }
+}
+
+void rounded_bubble_draw(HDC dc, RECT rect, COLORREF fill, COLORREF outline,
+                         int radius_pixels, int tail_center_x,
+                         int tail_width, int tail_height)
+{
+    GpGraphics *graphics = NULL;
+    GpPath *path = NULL;
+    GpSolidFill *brush = NULL;
+    GpPen *pen = NULL;
+    float left = (float)rect.left + 0.5f;
+    float top = (float)rect.top + 0.5f;
+    float right = (float)rect.right - 0.5f;
+    float body_bottom = (float)rect.bottom - (float)tail_height - 0.5f;
+    float bottom = (float)rect.bottom - 0.5f;
+    float radius = (float)radius_pixels;
+    float center = (float)rect.left + (float)tail_center_x;
+    float half_tail = (float)tail_width / 2.0f;
+    int success = 0;
+
+    if (radius > (right - left) / 2.0f) radius = (right - left) / 2.0f;
+    if (radius > (body_bottom - top) / 2.0f) radius = (body_bottom - top) / 2.0f;
+    if (center - half_tail < left + radius) center = left + radius + half_tail;
+    if (center + half_tail > right - radius) center = right - radius - half_tail;
+    if (gdiplus_token != 0 && radius > 0.0f && tail_height > 0 &&
+        GdipCreateFromHDC(dc, &graphics) == 0 &&
+        GdipSetSmoothingMode(graphics, 4) == 0 &&
+        GdipCreatePath(0, &path) == 0 &&
+        GdipAddPathLine(path, left + radius, top, right - radius, top) == 0 &&
+        GdipAddPathArc(path, right - radius * 2.0f, top, radius * 2.0f,
+                       radius * 2.0f, 270.0f, 90.0f) == 0 &&
+        GdipAddPathLine(path, right, top + radius, right, body_bottom - radius) == 0 &&
+        GdipAddPathArc(path, right - radius * 2.0f, body_bottom - radius * 2.0f,
+                       radius * 2.0f, radius * 2.0f, 0.0f, 90.0f) == 0 &&
+        GdipAddPathLine(path, right - radius, body_bottom, center + half_tail,
+                        body_bottom) == 0 &&
+        GdipAddPathLine(path, center + half_tail, body_bottom, center, bottom) == 0 &&
+        GdipAddPathLine(path, center, bottom, center - half_tail, body_bottom) == 0 &&
+        GdipAddPathLine(path, center - half_tail, body_bottom, left + radius,
+                        body_bottom) == 0 &&
+        GdipAddPathArc(path, left, body_bottom - radius * 2.0f,
+                       radius * 2.0f, radius * 2.0f, 90.0f, 90.0f) == 0 &&
+        GdipAddPathLine(path, left, body_bottom - radius, left, top + radius) == 0 &&
+        GdipAddPathArc(path, left, top, radius * 2.0f, radius * 2.0f,
+                       180.0f, 90.0f) == 0 &&
+        GdipClosePathFigure(path) == 0 &&
+        GdipCreateSolidFill(argb(fill), &brush) == 0 &&
+        GdipCreatePen1(argb(outline), 1.0f, 2, &pen) == 0 &&
+        GdipFillPath(graphics, (GpBrush *)brush, path) == 0 &&
+        GdipDrawPath(graphics, pen, path) == 0)
+        success = 1;
+
+    if (pen != NULL) GdipDeletePen(pen);
+    if (brush != NULL) GdipDeleteBrush((GpBrush *)brush);
+    if (path != NULL) GdipDeletePath(path);
+    if (graphics != NULL) GdipDeleteGraphics(graphics);
+    if (!success) {
+        RECT body = rect;
+        POINT triangle[3];
+        HBRUSH brush_fallback = CreateSolidBrush(fill);
+        HPEN pen_fallback = CreatePen(PS_SOLID, 1, outline);
+        HGDIOBJ old_brush;
+        HGDIOBJ old_pen;
+        body.bottom -= tail_height;
+        rounded_box_draw(dc, body, fill, outline, radius_pixels);
+        triangle[0].x = rect.left + tail_center_x - tail_width / 2;
+        triangle[0].y = body.bottom - 1;
+        triangle[1].x = rect.left + tail_center_x;
+        triangle[1].y = rect.bottom - 1;
+        triangle[2].x = rect.left + tail_center_x + tail_width / 2;
+        triangle[2].y = body.bottom - 1;
+        old_brush = SelectObject(dc, brush_fallback);
+        old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        Polygon(dc, triangle, 3);
+        SelectObject(dc, old_pen);
+        old_pen = SelectObject(dc, pen_fallback);
+        MoveToEx(dc, triangle[0].x, triangle[0].y, NULL);
+        LineTo(dc, triangle[1].x, triangle[1].y);
+        LineTo(dc, triangle[2].x, triangle[2].y);
+        SelectObject(dc, old_pen);
+        SelectObject(dc, old_brush);
+        DeleteObject(pen_fallback);
+        DeleteObject(brush_fallback);
     }
 }

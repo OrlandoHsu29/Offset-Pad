@@ -17,9 +17,15 @@
 #define ID_HOLD_HOTKEY 106
 #define ID_AUTOSTART_CARD 107
 #define ID_BLOCK_LETTERS_CARD 108
+#define ID_BLOCK_LETTERS_TITLE 114
 #define ID_AUTO_UPDATES 109
 #define ID_UPDATE_LINK 110
 #define ID_MODE_BADGE 111
+#define ID_RESET_HOTKEY 112
+#define ID_RESET_HOLD_HOTKEY 113
+#define RESET_TOOLTIP_TIMER_ID 0x4F74U
+#define RESET_TOOLTIP_DELAY_MS 400U
+#define RESET_HINT_CLASS L"OffsetPadResetHint"
 #define MENU_OPEN 201
 #define MENU_TOGGLE 202
 #define MENU_AUTOSTART 203
@@ -36,6 +42,7 @@ static HWND settings_window;
 static HWND autostart_check;
 static HWND block_letters_check;
 static HWND hotkey_button;
+static HWND shortcut_tooltip;
 static HWND hold_hotkey_button;
 static HWND auto_updates_check;
 static HWND update_link_button;
@@ -48,6 +55,7 @@ static HFONT body_font;
 static HFONT control_font;
 static HFONT small_font;
 static HFONT compact_font;
+static HFONT icon_font;
 static HICON light_icon;
 static HICON dark_icon;
 static HICON tray_o_icon;
@@ -60,6 +68,11 @@ static int dpi = 96;
 static int hovered_source_key = -1;
 static int mouse_leave_tracking;
 static int hovered_button_id;
+static int hovered_reset_id;
+static int pressed_reset_id;
+static int active_hint_id;
+static int tooltip_tail_center_x;
+static int hovered_hint_id;
 static wchar_t hotkey_capture_status[128];
 
 typedef struct hover_button {
@@ -69,7 +82,7 @@ typedef struct hover_button {
     int tracking_mouse_leave;
 } hover_button;
 
-static hover_button hover_buttons[7];
+static hover_button hover_buttons[8];
 
 static HICON current_icon(void)
 {
@@ -95,6 +108,7 @@ static HICON current_logo(void)
 #define COLOR_TINT RGB(246, 246, 246)
 #define COLOR_HOVER RGB(243, 243, 243)
 #define COLOR_ACCENT_HOVER RGB(58, 58, 58)
+#define COLOR_RESET_HOVER RGB(96, 96, 96)
 #define COLOR_BORDER RGB(222, 222, 222)
 #define COLOR_MODE_BADGE_HOVER_BORDER RGB(190, 190, 190)
 #define COLOR_KEYCAP RGB(252, 252, 252)
@@ -176,6 +190,191 @@ static hover_button *find_hover_button(HWND window)
     return NULL;
 }
 
+static LRESULT CALLBACK reset_hint_proc(HWND window, UINT message,
+                                        WPARAM wparam, LPARAM lparam)
+{
+    if (message == WM_PAINT) {
+        PAINTSTRUCT paint;
+        RECT rect;
+        RECT text_rect;
+        int tail_height = scale(6);
+        HDC dc = BeginPaint(window, &paint);
+        GetClientRect(window, &rect);
+        if (active_hint_id == ID_BLOCK_LETTERS_TITLE) {
+            rounded_bubble_draw(dc, rect, COLOR_TINT, COLOR_BORDER, scale(7),
+                                tooltip_tail_center_x, scale(12), tail_height);
+            text_rect = rect;
+            text_rect.bottom -= tail_height;
+            InflateRect(&text_rect, -scale(9), -scale(2));
+            draw_label(dc, L"启用小键盘模式后屏蔽未映射的字母键防止误触",
+                       text_rect, compact_font, COLOR_INK,
+                       DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+        } else {
+            rounded_bubble_draw(dc, rect, COLOR_TINT, COLOR_BORDER, scale(7),
+                                tooltip_tail_center_x, scale(12), tail_height);
+            text_rect = rect;
+            text_rect.bottom -= tail_height;
+            InflateRect(&text_rect, -scale(9), -scale(2));
+            draw_label(dc, L"重置快捷键", text_rect, compact_font, COLOR_INK,
+                       DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+        }
+        EndPaint(window, &paint);
+        return 0;
+    }
+    if (message == WM_ERASEBKGND)
+        return 1;
+    if (message == WM_NCHITTEST)
+        return HTTRANSPARENT;
+    if (message == WM_MOUSEACTIVATE)
+        return MA_NOACTIVATE;
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+static void update_reset_tooltip(HWND tool, int id)
+{
+    RECT client;
+    RECT owner_rect;
+    POINT anchor;
+    SIZE extent = {0};
+    wchar_t label[64];
+    HDC dc;
+    HGDIOBJ old_font;
+    int width;
+    int height;
+    int x;
+    int y;
+    if (shortcut_tooltip == NULL)
+        return;
+    if (id == 0 || tool == NULL) {
+        active_hint_id = 0;
+        ShowWindow(shortcut_tooltip, SW_HIDE);
+        return;
+    }
+    if (active_hint_id == id && IsWindowVisible(shortcut_tooltip))
+        return;
+    if (!GetClientRect(tool, &client))
+        return;
+
+    if (id == ID_BLOCK_LETTERS_TITLE) {
+        lstrcpynW(label, L"启用小键盘模式后屏蔽未映射的字母键防止误触",
+                  (int)(sizeof(label) / sizeof(label[0])));
+    } else {
+        lstrcpynW(label, L"重置快捷键",
+                  (int)(sizeof(label) / sizeof(label[0])));
+    }
+    dc = GetDC(tool);
+    if (dc == NULL)
+        return;
+    old_font = SelectObject(dc, compact_font != NULL ? compact_font :
+                            GetStockObject(DEFAULT_GUI_FONT));
+    GetTextExtentPoint32W(dc, label, (int)wcslen(label), &extent);
+    SelectObject(dc, old_font);
+    ReleaseDC(tool, dc);
+    width = extent.cx + scale(34);
+    if (width < scale(76))
+        width = scale(76);
+    height = scale(34);
+
+    if (id == ID_BLOCK_LETTERS_TITLE) {
+        MONITORINFO monitor_info = {sizeof(monitor_info)};
+        HMONITOR monitor;
+        SIZE title_extent = {0};
+        GetWindowTextW(GetDlgItem(GetParent(tool), ID_BLOCK_LETTERS_CARD),
+                       label, (int)(sizeof(label) / sizeof(label[0])));
+        dc = GetDC(tool);
+        if (dc == NULL)
+            return;
+        old_font = SelectObject(dc, control_font != NULL ? control_font :
+                                GetStockObject(DEFAULT_GUI_FONT));
+        GetTextExtentPoint32W(dc, label, (int)wcslen(label), &title_extent);
+        SelectObject(dc, old_font);
+        ReleaseDC(tool, dc);
+        if (!GetWindowRect(settings_window, &owner_rect))
+            return;
+        anchor.x = title_extent.cx / 2;
+        anchor.y = client.bottom / 2;
+        ClientToScreen(tool, &anchor);
+        x = anchor.x - width / 2;
+        y = anchor.y - height - scale(8);
+        monitor = MonitorFromWindow(settings_window, MONITOR_DEFAULTTONEAREST);
+        if (monitor != NULL && GetMonitorInfoW(monitor, &monitor_info)) {
+            if (x < monitor_info.rcWork.left)
+                x = monitor_info.rcWork.left;
+            if (x + width > monitor_info.rcWork.right)
+                x = monitor_info.rcWork.right - width;
+            if (y < monitor_info.rcWork.top)
+                y = monitor_info.rcWork.top;
+        }
+    } else {
+        anchor.x = client.right - scale(16);
+        anchor.y = scale(13);
+        ClientToScreen(tool, &anchor);
+        x = anchor.x - width / 2;
+        y = anchor.y - height - scale(8);
+        if (GetWindowRect(settings_window, &owner_rect)) {
+            if (x < owner_rect.left + scale(4))
+                x = owner_rect.left + scale(4);
+            if (x + width > owner_rect.right - scale(4))
+                x = owner_rect.right - width - scale(4);
+        }
+    }
+    tooltip_tail_center_x = anchor.x - x;
+    active_hint_id = id;
+    InvalidateRect(shortcut_tooltip, NULL, FALSE);
+    SetWindowPos(shortcut_tooltip, HWND_TOPMOST, x, y, width, height,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+static int shortcut_reset_at(HWND window, POINT point)
+{
+    RECT client;
+    RECT hit;
+    int control_id = GetDlgCtrlID(window);
+    if (control_id != ID_HOTKEY && control_id != ID_HOLD_HOTKEY)
+        return 0;
+    if (!GetClientRect(window, &client))
+        return 0;
+    hit.left = client.right - scale(28);
+    hit.top = scale(1);
+    hit.right = client.right - scale(4);
+    hit.bottom = scale(25);
+    if (!PtInRect(&hit, point))
+        return 0;
+    return control_id == ID_HOTKEY ? ID_RESET_HOTKEY : ID_RESET_HOLD_HOTKEY;
+}
+
+static int hover_hint_at(HWND window, POINT point)
+{
+    int reset_id = shortcut_reset_at(window, point);
+    if (reset_id != 0)
+        return reset_id;
+    if (GetDlgCtrlID(window) == ID_BLOCK_LETTERS_TITLE) {
+        RECT client;
+        RECT title_rect;
+        wchar_t label[64];
+        SIZE extent = {0};
+        HDC dc;
+        HGDIOBJ old_font;
+        if (!GetClientRect(window, &client))
+            return 0;
+        GetWindowTextW(GetDlgItem(GetParent(window), ID_BLOCK_LETTERS_CARD),
+                       label, (int)(sizeof(label) / sizeof(label[0])));
+        dc = GetDC(window);
+        if (dc == NULL)
+            return 0;
+        old_font = SelectObject(dc, control_font != NULL ? control_font :
+                                GetStockObject(DEFAULT_GUI_FONT));
+        GetTextExtentPoint32W(dc, label, (int)wcslen(label), &extent);
+        SelectObject(dc, old_font);
+        ReleaseDC(window, dc);
+        title_rect.left = 0;
+        title_rect.right = extent.cx;
+        title_rect.top = (client.bottom - scale(20)) / 2;
+        title_rect.bottom = title_rect.top + scale(20);
+        if (PtInRect(&title_rect, point))
+            return ID_BLOCK_LETTERS_TITLE;
+    }
+    return 0;
+}
+
 static void invalidate_hover_button(int id)
 {
     size_t index;
@@ -189,6 +388,9 @@ static void invalidate_hover_button(int id)
     }
 }
 
+
+static void update_reset_tooltip(HWND tool, int id);
+
 static LRESULT CALLBACK hover_button_proc(HWND window, UINT message,
                                           WPARAM wparam, LPARAM lparam)
 {
@@ -199,7 +401,12 @@ static LRESULT CALLBACK hover_button_proc(HWND window, UINT message,
     original_proc = button->original_proc;
     if (message == WM_MOUSEMOVE) {
         TRACKMOUSEEVENT tracking = {sizeof(tracking), TME_LEAVE, window, HOVER_DEFAULT};
+        POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
         int previous_id = hovered_button_id;
+        int previous_reset_id = hovered_reset_id;
+        int previous_hint_id = hovered_hint_id;
+        int reset_id = shortcut_reset_at(window, point);
+        int hint_id = hover_hint_at(window, point);
         if (!button->tracking_mouse_leave && TrackMouseEvent(&tracking))
             button->tracking_mouse_leave = 1;
         if (hovered_source_key >= 0) {
@@ -207,16 +414,62 @@ static LRESULT CALLBACK hover_button_proc(HWND window, UINT message,
             InvalidateRect(GetParent(window), NULL, FALSE);
         }
         hovered_button_id = button->id;
-        if (previous_id != hovered_button_id) {
+        hovered_reset_id = reset_id;
+        hovered_hint_id = hint_id;
+        if (previous_id != hovered_button_id &&
+            previous_id != ID_BLOCK_LETTERS_TITLE)
             invalidate_hover_button(previous_id);
+        if ((previous_id != hovered_button_id || previous_reset_id != hovered_reset_id) &&
+            button->id != ID_BLOCK_LETTERS_TITLE)
             InvalidateRect(window, NULL, FALSE);
+        if (previous_hint_id != hovered_hint_id) {
+            KillTimer(window, RESET_TOOLTIP_TIMER_ID);
+            update_reset_tooltip(window, 0);
+            if (hovered_hint_id != 0 &&
+                SetTimer(window, RESET_TOOLTIP_TIMER_ID, RESET_TOOLTIP_DELAY_MS, NULL) == 0)
+                update_reset_tooltip(window, hovered_hint_id);
         }
     } else if (message == WM_MOUSELEAVE) {
         button->tracking_mouse_leave = 0;
         if (hovered_button_id == button->id) {
+            KillTimer(window, RESET_TOOLTIP_TIMER_ID);
+            update_reset_tooltip(window, 0);
             hovered_button_id = 0;
-            InvalidateRect(window, NULL, FALSE);
+            hovered_reset_id = 0;
+            hovered_hint_id = 0;
+            if (button->id != ID_BLOCK_LETTERS_TITLE)
+                InvalidateRect(window, NULL, FALSE);
         }
+    } else if (message == WM_TIMER && wparam == RESET_TOOLTIP_TIMER_ID) {
+        KillTimer(window, RESET_TOOLTIP_TIMER_ID);
+        if (hovered_hint_id != 0)
+            update_reset_tooltip(window, hovered_hint_id);
+        return 0;
+    } else if (message == WM_LBUTTONDOWN) {
+        POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+        int reset_id = shortcut_reset_at(window, point);
+        if (reset_id != 0) {
+            pressed_reset_id = reset_id;
+            SetFocus(window);
+            SetCapture(window);
+            InvalidateRect(window, NULL, FALSE);
+            return 0;
+        }
+    } else if (message == WM_LBUTTONUP && pressed_reset_id != 0) {
+        POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+        int reset_id = pressed_reset_id;
+        int activate = shortcut_reset_at(window, point) == reset_id;
+        pressed_reset_id = 0;
+        if (GetCapture() == window)
+            ReleaseCapture();
+        InvalidateRect(window, NULL, FALSE);
+        if (activate)
+            SendMessageW(GetParent(window), WM_COMMAND,
+                         MAKEWPARAM(reset_id, BN_CLICKED), (LPARAM)window);
+        return 0;
+    } else if (message == WM_CAPTURECHANGED && pressed_reset_id != 0) {
+        pressed_reset_id = 0;
+        InvalidateRect(window, NULL, FALSE);
     } else if (message == WM_NCDESTROY) {
         if (hovered_button_id == button->id)
             hovered_button_id = 0;
@@ -422,12 +675,15 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         RECT name_rect = rect;
         RECT value_rect = rect;
         int is_hold = item->CtlID == ID_HOLD_HOTKEY;
+        int reset_id = is_hold ? ID_RESET_HOLD_HOTKEY : ID_RESET_HOTKEY;
+        int reset_hovered = hovered_reset_id == reset_id;
         int capturing = is_hold ? keymap_is_hold_capturing() : keymap_is_capturing();
-        fill = pressed ? COLOR_TINT : (hovered ? COLOR_HOVER : COLOR_WHITE);
+        fill = pressed ? COLOR_TINT :
+               (hovered && !reset_hovered ? COLOR_HOVER : COLOR_WHITE);
         rounded_box(dc, rect, fill,
                     (pressed || capturing) ? COLOR_ACCENT : COLOR_BORDER, 12);
         name_rect.left += scale(12);
-        name_rect.right -= scale(12);
+        name_rect.right -= scale(34);
         name_rect.top += scale(5);
         name_rect.bottom = name_rect.top + scale(18);
         GetWindowTextW(item->hwndItem, title,
@@ -451,7 +707,7 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
             draw_label(dc, L"· ", name_rect, control_font, COLOR_MUTED,
                        DT_SINGLELINE | DT_LEFT | DT_VCENTER);
             name_rect.left += tag_extent.cx;
-            name_rect.right = rect.right - scale(12);
+            name_rect.right = rect.right - scale(34);
             draw_label(dc, tag, name_rect, control_font, COLOR_MUTED,
                        DT_SINGLELINE | DT_LEFT | DT_VCENTER);
         }
@@ -473,6 +729,18 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
             keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
                                  is_hold ? keymap_get_hold_hotkey() : keymap_get_hotkey());
         draw_shortcut_value(dc, shortcut, value_rect);
+        {
+            int diameter = scale(16);
+            RECT circle = {rect.right - scale(24), rect.top + scale(5),
+                           rect.right - scale(8), rect.top + scale(21)};
+            COLORREF circle_fill = pressed_reset_id == reset_id ? COLOR_ACCENT_DOWN :
+                                   (hovered_reset_id == reset_id ?
+                                    COLOR_RESET_HOVER : COLOR_ACCENT);
+            rounded_box(dc, circle, circle_fill, circle_fill, diameter / 2);
+            OffsetRect(&circle, 0, -scale(1));
+            draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
+                       COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+        }
         return;
     }
 
@@ -710,7 +978,7 @@ void ui_hotkey_capture_result(WPARAM result)
     switch (result) {
     case KEYMAP_CAPTURE_INVALID_ALT:
         lstrcpynW(hotkey_capture_status,
-                  L"不支持 Alt+单键/Alt+Shift：易导致文本框失去聚焦",
+                  L"不支持 Alt+字符/Shift：会导致文本框失去聚焦",
                   (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
         break;
     case KEYMAP_CAPTURE_INVALID_COUNT:
@@ -781,6 +1049,10 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                                               WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
                                               scale(24), scale(409), scale(196), scale(46),
                                               window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS_CARD, instance, NULL);
+        CreateWindowExW(WS_EX_TRANSPARENT, L"STATIC", L"",
+                        WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY,
+                        scale(38), scale(422), scale(128), scale(20),
+                        window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS_TITLE, instance, NULL);
         CreateWindowExW(0, L"STATIC", L"开机时启动",
                                            WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
                                            scale(232), scale(409), scale(168), scale(46),
@@ -810,10 +1082,15 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         attach_hover_tracking(GetDlgItem(window, ID_HOTKEY), ID_HOTKEY);
         attach_hover_tracking(GetDlgItem(window, ID_HOLD_HOTKEY), ID_HOLD_HOTKEY);
         attach_hover_tracking(GetDlgItem(window, ID_BLOCK_LETTERS), ID_BLOCK_LETTERS);
+        attach_hover_tracking(GetDlgItem(window, ID_BLOCK_LETTERS_TITLE), ID_BLOCK_LETTERS_TITLE);
         attach_hover_tracking(GetDlgItem(window, ID_AUTOSTART), ID_AUTOSTART);
         attach_hover_tracking(GetDlgItem(window, ID_AUTO_UPDATES), ID_AUTO_UPDATES);
         attach_hover_tracking(GetDlgItem(window, ID_UPDATE_LINK), ID_UPDATE_LINK);
         attach_hover_tracking(GetDlgItem(window, ID_MODE_BADGE), ID_MODE_BADGE);
+        shortcut_tooltip = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                RESET_HINT_CLASS, L"", WS_POPUP,
+                0, 0, scale(96), scale(28), window, NULL, instance, NULL);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -863,6 +1140,8 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         if (lparam != 0) {
             const DRAWITEMSTRUCT *item = (const DRAWITEMSTRUCT *)lparam;
             if (item->CtlType == ODT_STATIC) {
+                if (item->CtlID == ID_BLOCK_LETTERS_TITLE)
+                    return TRUE;
                 draw_setting_card(item);
                 return TRUE;
             }
@@ -925,6 +1204,30 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             }
             ui_refresh();
             return 0;
+        case ID_RESET_HOTKEY:
+            {
+                keymap_hotkey value = settings_default_hotkey();
+                keymap_cancel_capture();
+                hotkey_capture_status[0] = L'\0';
+                if (!settings_save_hotkey(value))
+                    show_error(L"无法保存快捷键设置。");
+                else
+                    keymap_set_hotkey(value);
+                ui_refresh();
+                return 0;
+            }
+        case ID_RESET_HOLD_HOTKEY:
+            {
+                keymap_hotkey value = settings_default_hold_hotkey();
+                keymap_cancel_capture();
+                hotkey_capture_status[0] = L'\0';
+                if (!settings_save_hold_hotkey(value))
+                    show_error(L"无法保存快捷键设置。");
+                else
+                    keymap_set_hold_hotkey(value);
+                ui_refresh();
+                return 0;
+            }
         case ID_MODE_BADGE:
             keymap_cancel_capture();
             actions.set_enabled(!keymap_is_enabled());
@@ -973,6 +1276,11 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         }
         return 0;
     case WM_DESTROY:
+        if (shortcut_tooltip != NULL) {
+            DestroyWindow(shortcut_tooltip);
+            shortcut_tooltip = NULL;
+            active_hint_id = 0;
+        }
         settings_window = NULL;
         autostart_check = NULL;
         block_letters_check = NULL;
@@ -994,6 +1302,7 @@ int ui_init(HINSTANCE app_instance, HWND window, HICON inactive_icon,
             HICON active_tray_icon, const app_ui_actions *callbacks)
 {
     WNDCLASSW definition = {0};
+    WNDCLASSW hint_definition = {0};
     instance = app_instance;
     message_window = window;
     light_icon = inactive_icon;
@@ -1009,6 +1318,14 @@ int ui_init(HINSTANCE app_instance, HWND window, HICON inactive_icon,
     definition.lpszClassName = settings_class;
     if (!RegisterClassW(&definition))
         return 0;
+    hint_definition.lpfnWndProc = reset_hint_proc;
+    hint_definition.hInstance = instance;
+    hint_definition.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    hint_definition.lpszClassName = RESET_HINT_CLASS;
+    if (!RegisterClassW(&hint_definition)) {
+        UnregisterClassW(settings_class, instance);
+        return 0;
+    }
     add_tray();
     ui_refresh();
     return 1;
@@ -1026,6 +1343,7 @@ void ui_shutdown(void)
         Shell_NotifyIconW(NIM_DELETE, &data);
         tray_added = 0;
     }
+    UnregisterClassW(RESET_HINT_CLASS, instance);
     UnregisterClassW(settings_class, instance);
     if (title_font != NULL) DeleteObject(title_font);
     if (heading_font != NULL) DeleteObject(heading_font);
@@ -1033,12 +1351,14 @@ void ui_shutdown(void)
     if (control_font != NULL) DeleteObject(control_font);
     if (small_font != NULL) DeleteObject(small_font);
     if (compact_font != NULL) DeleteObject(compact_font);
+    if (icon_font != NULL) DeleteObject(icon_font);
     title_font = NULL;
     heading_font = NULL;
     body_font = NULL;
     control_font = NULL;
     small_font = NULL;
     compact_font = NULL;
+    icon_font = NULL;
     rounded_box_shutdown();
 }
 
@@ -1088,6 +1408,11 @@ void ui_show(void)
             compact_font = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        if (icon_font == NULL)
+            icon_font = CreateFontW(-scale(12), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                    L"Segoe UI Symbol");
         rect = scaled_rect(0, 0, 424, 500);
         AdjustWindowRect(&rect, style, FALSE);
         width = rect.right - rect.left;

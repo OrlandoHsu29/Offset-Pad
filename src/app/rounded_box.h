@@ -8,5 +8,8 @@ int rounded_box_init(void);
 void rounded_box_shutdown(void);
 void rounded_box_draw(HDC dc, RECT rect, COLORREF fill, COLORREF outline,
                       int radius_pixels);
+void rounded_bubble_draw(HDC dc, RECT rect, COLORREF fill, COLORREF outline,
+                         int radius_pixels, int tail_center_x,
+                         int tail_width, int tail_height);
 
 #endif
