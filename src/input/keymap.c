@@ -81,6 +81,8 @@ static unsigned int passed_letter_keys;
 static unsigned char modifiers[TRACKED_MODIFIER_COUNT];
 static unsigned char captured_modifiers[TRACKED_MODIFIER_COUNT];
 static unsigned int capture_modifiers_seen;
+static DWORD capture_key_pending;
+static keymap_hotkey capture_key_value;
 static DWORD captured_key;
 static capture_mode capture;
 static int block_hotkey_until_clear;
@@ -862,6 +864,20 @@ static int only_modifier_families(unsigned int value, unsigned int allowed)
     return value != 0 && (value & ~allowed) == 0;
 }
 
+static int alt_shortcut_is_unsafe(keymap_hotkey value)
+{
+    /* Ctrl-containing Alt chords are allowed; only the known disruptive forms are blocked. */
+    if ((value.modifiers & KEYMAP_MOD_CTRL_ANY) != 0)
+        return 0;
+    return (value.key != 0 &&
+            only_modifier_families(value.modifiers, KEYMAP_MOD_ALT_ANY)) ||
+           (value.key == 0 &&
+            only_modifier_families(value.modifiers,
+                                   KEYMAP_MOD_ALT_ANY | KEYMAP_MOD_SHIFT_ANY) &&
+            (value.modifiers & KEYMAP_MOD_ALT_ANY) != 0 &&
+            (value.modifiers & KEYMAP_MOD_SHIFT_ANY) != 0);
+}
+
 static int validate_hotkey(keymap_hotkey value)
 {
     unsigned int key_count;
@@ -879,13 +895,7 @@ static int validate_hotkey(keymap_hotkey value)
         (value.modifiers == 0 && source_in_use(value.key)))
         return key_count < 2 || key_count > 4 ?
                KEYMAP_CAPTURE_INVALID_COUNT : KEYMAP_CAPTURE_INVALID;
-    if ((value.key != 0 &&
-         only_modifier_families(value.modifiers, KEYMAP_MOD_ALT_ANY)) ||
-        (value.key == 0 &&
-         only_modifier_families(value.modifiers,
-                                KEYMAP_MOD_ALT_ANY | KEYMAP_MOD_SHIFT_ANY) &&
-         (value.modifiers & KEYMAP_MOD_ALT_ANY) != 0 &&
-         (value.modifiers & KEYMAP_MOD_SHIFT_ANY) != 0))
+    if (alt_shortcut_is_unsafe(value))
         return KEYMAP_CAPTURE_INVALID_ALT;
     return KEYMAP_CAPTURE_SAVED;
 }
@@ -1046,6 +1056,16 @@ static int hotkey_capture_active(void)
     return capture == CAPTURE_TOGGLE_HOTKEY || capture == CAPTURE_HOLD_HOTKEY;
 }
 
+static int capture_modifier_is_down(void)
+{
+    size_t index;
+    for (index = 0; index < TRACKED_MODIFIER_COUNT; ++index) {
+        if (captured_modifiers[index])
+            return 1;
+    }
+    return 0;
+}
+
 int keymap_is_capturing(void)
 {
     return capture == CAPTURE_TOGGLE_HOTKEY;
@@ -1090,6 +1110,8 @@ static void begin_capture(capture_mode mode, size_t source_index)
     capture = mode;
     source_capture_index = source_index;
     capture_modifiers_seen = 0;
+    capture_key_pending = 0;
+    ZeroMemory(&capture_key_value, sizeof(capture_key_value));
     block_hotkey_until_clear = 1;
 }
 
@@ -1117,6 +1139,8 @@ void keymap_cancel_capture(void)
     capture = CAPTURE_NONE;
     source_capture_index = KEYMAP_KEY_COUNT;
     capture_modifiers_seen = 0;
+    capture_key_pending = 0;
+    ZeroMemory(&capture_key_value, sizeof(capture_key_value));
     block_hotkey_until_clear = 1;
     clear_hotkey_block_if_released();
     if (previous == CAPTURE_TOGGLE_HOTKEY && capture_message != 0)
@@ -1141,6 +1165,8 @@ static void finish_capture(keymap_hotkey value)
         result = KEYMAP_CAPTURE_INVALID;
     capture = CAPTURE_NONE;
     capture_modifiers_seen = 0;
+    capture_key_pending = 0;
+    ZeroMemory(&capture_key_value, sizeof(capture_key_value));
     if (result == KEYMAP_CAPTURE_SAVED) {
         if (is_hold)
             keymap_set_hold_hotkey(value);
@@ -1297,10 +1323,12 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 return 1;
             }
             if (captured_modifiers[modifier]) {
-                keymap_hotkey captured = {capture_modifiers_seen, 0};
                 captured_modifiers[modifier] = 0;
-                if (captured.modifiers != 0)
+                if (capture_key_pending == 0 && !capture_modifier_is_down() &&
+                    capture_modifiers_seen != 0) {
+                    keymap_hotkey captured = {capture_modifiers_seen, 0};
                     finish_capture(captured);
+                }
                 return 1;
             }
             return CallNextHookEx(hook, code, message, parameter);
@@ -1449,6 +1477,21 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         return 1;
     }
 
+    if (capture_key_pending != 0) {
+        if (event->vkCode == capture_key_pending && released) {
+            keymap_hotkey captured = capture_key_value;
+            capture_key_pending = 0;
+            if (captured_key == event->vkCode)
+                captured_key = 0;
+            ZeroMemory(&capture_key_value, sizeof(capture_key_value));
+            if (hotkey_capture_active())
+                finish_capture(captured);
+            return 1;
+        }
+        if (hotkey_capture_active())
+            return 1;
+    }
+
     if (event->vkCode >= 'A' && event->vkCode <= 'Z') {
         unsigned int bit = 1U << (event->vkCode - 'A');
         if (blocked_letter_keys & bit) {
@@ -1480,15 +1523,20 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     }
     if (hotkey_capture_active()) {
         if (!released) {
-            keymap_hotkey captured = {active_modifiers(), event->vkCode};
-            captured_key = event->vkCode;
-            if (event->vkCode == VK_ESCAPE)
+            keymap_hotkey captured = {capture_modifiers_seen | active_modifiers(),
+                                      event->vkCode};
+            if (event->vkCode == VK_ESCAPE) {
+                captured_key = event->vkCode;
                 keymap_cancel_capture();
-            else if (captured.modifiers == 0 &&
-                     (captured.key == VK_DELETE || captured.key == VK_BACK))
+            } else if (captured.modifiers == 0 &&
+                       (captured.key == VK_DELETE || captured.key == VK_BACK)) {
+                captured_key = event->vkCode;
                 finish_capture((keymap_hotkey){0, 0});
-            else
-                finish_capture(captured);
+            } else {
+                capture_key_pending = event->vkCode;
+                captured_key = event->vkCode;
+                capture_key_value = captured;
+            }
             return 1;
         }
         return CallNextHookEx(hook, code, message, parameter);

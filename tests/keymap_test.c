@@ -192,6 +192,8 @@ int main(void)
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 'K'}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_LCTRL | KEYMAP_MOD_LALT | KEYMAP_MOD_LSHIFT, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_LCTRL, 'K'}));
@@ -370,9 +372,10 @@ int main(void)
     assert(caps_event(1) == 1);
     modifier(VK_LSHIFT, 1);
     modifier(VK_LSHIFT, 0);
+    assert(keymap_is_capturing());
+    assert(caps_event(0) == 1);
     assert(!keymap_is_capturing());
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
-    assert(caps_event(0) == 1);
     /* Non-Caps shortcuts bypass Caps tracking and preserve ordinary Caps behavior. */
     keymap_set_enabled(0);
     keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE});
@@ -417,10 +420,11 @@ int main(void)
     modifier(VK_LCONTROL, 1);
     modifier(VK_LSHIFT, 1);
     key_event('K', WM_KEYDOWN);
+    assert(keymap_is_capturing());
+    key_event('K', WM_KEYUP);
     value = keymap_get_hotkey();
     assert(!keymap_is_capturing());
     assert(value.modifiers == (KEYMAP_MOD_LCTRL | KEYMAP_MOD_LSHIFT) && value.key == 'K');
-    key_event('K', WM_KEYUP);
     modifier(VK_LSHIFT, 0);
     modifier(VK_LCONTROL, 0);
     keymap_set_hold_hotkey((keymap_hotkey){0, 0});
@@ -455,10 +459,12 @@ int main(void)
     modifier(VK_LMENU, 1);
     modifier(VK_LSHIFT, 1);
     key_event('K', WM_KEYDOWN);
+    assert(keymap_is_capturing());
+    key_event('K', WM_KEYUP);
     value = keymap_get_hotkey();
+    assert(!keymap_is_capturing());
     assert(value.modifiers == (KEYMAP_MOD_LCTRL | KEYMAP_MOD_LALT | KEYMAP_MOD_LSHIFT));
     assert(value.key == 'K');
-    key_event('K', WM_KEYUP);
     modifier(VK_LSHIFT, 0);
     modifier(VK_LMENU, 0);
     modifier(VK_LCONTROL, 0);
@@ -479,6 +485,28 @@ int main(void)
     assert(keymap_get_hotkey().modifiers == value.modifiers);
     keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]), value);
     assert(wcscmp(name, L"LCtrl + LAlt + LShift + K") == 0);
+
+    keymap_begin_capture();
+    modifier(VK_LMENU, 1);
+    modifier(VK_LSHIFT, 1);
+    key_event('K', WM_KEYDOWN);
+    assert(keymap_is_capturing());
+    key_event('K', WM_KEYUP);
+    value = keymap_get_hotkey();
+    assert(value.modifiers == (KEYMAP_MOD_LALT | KEYMAP_MOD_LSHIFT) && value.key == 'K');
+    modifier(VK_LSHIFT, 0);
+    modifier(VK_LMENU, 0);
+
+    keymap_begin_capture();
+    modifier(VK_LSHIFT, 1);
+    modifier(VK_LCONTROL, 1);
+    key_event('J', WM_KEYDOWN);
+    assert(keymap_is_capturing());
+    key_event('J', WM_KEYUP);
+    value = keymap_get_hotkey();
+    assert(value.modifiers == (KEYMAP_MOD_LCTRL | KEYMAP_MOD_LSHIFT) && value.key == 'J');
+    modifier(VK_LCONTROL, 0);
+    modifier(VK_LSHIFT, 0);
 
     keymap_begin_capture();
     keymap_begin_source_capture(6);
