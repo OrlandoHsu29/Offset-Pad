@@ -219,7 +219,7 @@ int main(void)
                          (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
     assert(wcscmp(name, L"Caps + Shift") == 0);
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN, 'K'}));
-    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) &&
+    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) &&
            keymap_get_hotkey().key == 0);
     assert(keymap_get_hold_hotkey().modifiers == KEYMAP_MOD_CAPS &&
            keymap_get_hold_hotkey().key == 0);
@@ -265,12 +265,24 @@ int main(void)
     assert(caps_event(0) == 0);
     assert(!keymap_is_visual_enabled());
 
-    /* Holding Caps past the preview delay changes visuals only. */
-    assert(caps_event(1) == 0);
+    /* A long Caps hold previews keypad mode, then restores the original Caps state. */
+    mock_caps_lock_on = 0;
+    assert(caps_event(1) == 0 && mock_caps_lock_on);
+    now_ms += KEYMAP_CAPS_PREVIEW_DELAY_MS;
     keymap_handle_timer(KEYMAP_CAPS_PREVIEW_TIMER_ID);
     assert(!keymap_is_enabled() && keymap_is_visual_enabled());
     assert(caps_event(0) == 0);
     assert(!keymap_is_enabled() && !keymap_is_visual_enabled());
+    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
+    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    assert(!mock_caps_lock_on);
+    /* Elapsed time still restores Caps if the preview timer dispatch was delayed. */
+    assert(caps_event(1) == 0 && mock_caps_lock_on);
+    now_ms += KEYMAP_CAPS_PREVIEW_DELAY_MS;
+    assert(caps_event(0) == 0);
+    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
+    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    assert(!mock_caps_lock_on);
 
     /* Caps plus a character temporarily activates the keypad, then restores Caps. */
     keymap_set_enabled(0);

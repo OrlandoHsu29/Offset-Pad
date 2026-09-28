@@ -102,6 +102,7 @@ static caps_restore_phase caps_restore;
 static caps_press_action caps_action;
 static int caps_preview_active;
 static int caps_preview_timer_active;
+static ULONGLONG caps_press_started;
 
 typedef struct shortcut_compensation {
     DWORD key;
@@ -1251,6 +1252,11 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             try_shift_compensation_after_release();
             return 1;
         }
+        if (caps_action == CAPS_PRESS_PENDING &&
+            caps_restore == CAPS_RESTORE_ARMED &&
+            GetTickCount64() - caps_press_started >= KEYMAP_CAPS_PREVIEW_DELAY_MS)
+            caps_restore = CAPS_RESTORE_ON_RELEASE;
+        caps_press_started = 0;
         cancel_caps_preview();
         if (caps_action == CAPS_PRESS_HOLD)
             set_hold_active(0);
@@ -1270,6 +1276,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
         /* Keep the real layer off until a character key is pressed. */
         caps_action = CAPS_PRESS_PENDING;
+        caps_press_started = GetTickCount64();
         start_caps_preview_timer();
     }
     if (modifier == CAPS_MODIFIER_INDEX && !released &&
