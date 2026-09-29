@@ -83,6 +83,8 @@ void keymap_set_hold_capture_message(UINT message);
 void keymap_set_effective_changed_message(UINT message);
 void keymap_set_source_capture_message(UINT message);
 void keymap_set_reminder_message(UINT message);
+void keymap_set_preview_message(UINT message);
+void keymap_set_preview_enabled(int enabled);
 void keymap_handle_timer(UINT_PTR timer_id);
 void keymap_begin_source_capture(size_t index);
 int keymap_is_source_capturing(void);

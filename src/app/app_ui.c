@@ -66,6 +66,7 @@ static app_ui_actions actions;
 static int tray_added;
 static int dpi = 96;
 static int hovered_source_key = -1;
+static unsigned int pressed_source_keys;
 static int mouse_leave_tracking;
 static int hovered_button_id;
 static int hovered_reset_id;
@@ -506,17 +507,19 @@ static void attach_hover_tracking(HWND window, int id)
 }
 
 static void draw_keycap(HDC dc, int left, int top, int width,
-                        const wchar_t *label, int output, int selected, int hovered)
+                        const wchar_t *label, int output, int selected, int hovered,
+                        int pressed)
 {
+    int active = selected || pressed;
     RECT rect = scaled_rect(left, top, left + width, top + 24);
-    COLORREF fill = selected ? COLOR_ACCENT :
+    COLORREF fill = active ? COLOR_ACCENT :
                     (hovered ? COLOR_KEYCAP_HOVER :
                      (output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP));
     rounded_box(dc, rect, fill,
-                selected ? COLOR_ACCENT : COLOR_BORDER, 7);
+                active ? COLOR_ACCENT : COLOR_BORDER, 7);
     draw_label(dc, label, rect,
                width <= 40 && wcslen(label) > 2 ? small_font : body_font,
-               selected ? COLOR_WHITE : COLOR_INK,
+               active ? COLOR_WHITE : COLOR_INK,
                DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
@@ -592,6 +595,7 @@ static void paint_settings(HDC dc, const RECT *client)
         };
         int row;
         int column;
+        int visual_enabled = keymap_is_visual_enabled();
         for (row = 0; row < 4; ++row) {
             int top = 220 + row * 29;
             if (row < 3) {
@@ -604,12 +608,15 @@ static void paint_settings(HDC dc, const RECT *client)
                     keymap_format_source(source_label,
                                          sizeof(source_label) / sizeof(source_label[0]),
                                          keymap_get_source(index));
+                    int pressed = (pressed_source_keys & (1U << index)) != 0;
                     draw_keycap(dc, source_left + column * 37, top, 29,
                                 selected ? L"?" :
                                 keymap_get_source(index) == VK_CAPITAL ? L"CL" : source_label,
-                                0, selected, hovered_source_key == (int)index);
+                                0, selected, hovered_source_key == (int)index,
+                                !visual_enabled && pressed);
                     draw_keycap(dc, 275 + column * 37, top, 29,
-                                target_keys[row][column], 1, 0, 0);
+                                target_keys[row][column], 1, 0, 0,
+                                visual_enabled && pressed);
                 }
             } else {
                 int selected = keymap_is_source_capturing() &&
@@ -618,9 +625,12 @@ static void paint_settings(HDC dc, const RECT *client)
                 keymap_format_source(source_label,
                                      sizeof(source_label) / sizeof(source_label[0]),
                                      keymap_get_source(9));
+                int pressed = (pressed_source_keys & (1U << 9)) != 0;
                 draw_keycap(dc, 74, top, 103,
-                            selected ? L"按键" : source_label, 0, selected, hovered_source_key == 9);
-                draw_keycap(dc, 294, top, 66, L"0", 1, 0, 0);
+                            selected ? L"按键" : source_label, 0, selected,
+                            hovered_source_key == 9, !visual_enabled && pressed);
+                draw_keycap(dc, 294, top, 66, L"0", 1, 0, 0,
+                            visual_enabled && pressed);
             }
             rect = scaled_rect(215, top, 240, top + 24);
             draw_label(dc, L"→", rect, body_font, COLOR_MUTED,
@@ -964,6 +974,20 @@ void ui_restore_update_available(void)
     set_update_available_indicator();
 }
 
+void ui_key_preview(size_t source_index, int down)
+{
+    unsigned int mask;
+    if (settings_window == NULL || source_index >= KEYMAP_KEY_COUNT)
+        return;
+    mask = 1U << source_index;
+    if (down)
+        pressed_source_keys |= mask;
+    else
+        pressed_source_keys &= ~mask;
+    InvalidateRect(settings_window, NULL, FALSE);
+    UpdateWindow(settings_window);
+}
+
 void ui_show_update_available(const wchar_t *version)
 {
     NOTIFYICONDATAW data = {0};
@@ -1299,6 +1323,8 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         auto_updates_check = NULL;
         update_link_button = NULL;
         mode_badge_button = NULL;
+        keymap_set_preview_enabled(0);
+        pressed_source_keys = 0;
         hovered_source_key = -1;
         mouse_leave_tracking = 0;
         hovered_button_id = 0;
@@ -1441,6 +1467,7 @@ void ui_show(void)
         SendMessageW(settings_window, WM_SETICON, ICON_SMALL, (LPARAM)current_icon());
         SendMessageW(settings_window, WM_SETICON, ICON_BIG, (LPARAM)current_logo());
     }
+    keymap_set_preview_enabled(1);
     ui_refresh();
     ShowWindow(settings_window, SW_SHOWNORMAL);
     SetForegroundWindow(settings_window);

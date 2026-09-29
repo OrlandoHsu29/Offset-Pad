@@ -25,6 +25,7 @@ typedef struct mapped_key {
     unsigned char down;
     unsigned char swallow_up;
     DWORD swallow_source;
+    unsigned char preview_down;
 } mapped_key;
 
 typedef enum capture_mode {
@@ -51,11 +52,11 @@ typedef enum caps_restore_phase {
 } caps_restore_phase;
 
 static mapped_key keys[KEYMAP_KEY_COUNT] = {
-    {'U', L'7', 0, 0, 0}, {'I', L'8', 0, 0, 0},
-    {'O', L'9', 0, 0, 0}, {'J', L'4', 0, 0, 0},
-    {'K', L'5', 0, 0, 0}, {'L', L'6', 0, 0, 0},
-    {'N', L'1', 0, 0, 0}, {'M', L'2', 0, 0, 0},
-    {VK_OEM_COMMA, L'3', 0, 0, 0}, {VK_SPACE, L'0', 0, 0, 0}
+    {'U', L'7', 0, 0, 0, 0}, {'I', L'8', 0, 0, 0, 0},
+    {'O', L'9', 0, 0, 0, 0}, {'J', L'4', 0, 0, 0, 0},
+    {'K', L'5', 0, 0, 0, 0}, {'L', L'6', 0, 0, 0, 0},
+    {'N', L'1', 0, 0, 0, 0}, {'M', L'2', 0, 0, 0, 0},
+    {VK_OEM_COMMA, L'3', 0, 0, 0, 0}, {VK_SPACE, L'0', 0, 0, 0, 0}
 };
 
 static HHOOK hook;
@@ -66,6 +67,8 @@ static UINT hold_capture_message;
 static UINT effective_changed_message;
 static UINT source_capture_message;
 static UINT reminder_message;
+static UINT preview_message;
+static int preview_enabled;
 static ULONGLONG reminder_window_start;
 static ULONGLONG reminder_last_sent;
 static unsigned int reminder_press_count;
@@ -1055,6 +1058,21 @@ void keymap_set_reminder_message(UINT message)
     reminder_message = message;
 }
 
+void keymap_set_preview_message(UINT message)
+{
+    preview_message = message;
+}
+
+void keymap_set_preview_enabled(int value)
+{
+    size_t index;
+    preview_enabled = value != 0;
+    if (!preview_enabled) {
+        for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
+            keys[index].preview_down = 0;
+    }
+}
+
 static int hotkey_capture_active(void)
 {
     return capture == CAPTURE_TOGGLE_HOTKEY || capture == CAPTURE_HOLD_HOTKEY;
@@ -1502,6 +1520,24 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
     }
 
+    if (preview_enabled && !hotkey_capture_active() && !keymap_is_source_capturing()) {
+        for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
+            if (keys[index].source != event->vkCode)
+                continue;
+            if (released && keys[index].preview_down) {
+                keys[index].preview_down = 0;
+                if (preview_message != 0 && notify_window != NULL)
+                    PostMessageW(notify_window, preview_message, index, 0);
+            } else if (!released && !keys[index].preview_down &&
+                       (active_modifiers() == 0 || hold_active)) {
+                keys[index].preview_down = 1;
+                if (preview_message != 0 && notify_window != NULL)
+                    PostMessageW(notify_window, preview_message, index, 1);
+            }
+            break;
+        }
+    }
+
     if (event->vkCode >= 'A' && event->vkCode <= 'Z') {
         unsigned int bit = 1U << (event->vkCode - 'A');
         if (blocked_letter_keys & bit) {
@@ -1609,6 +1645,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
         if (key->source != event->vkCode)
             continue;
+
         if (released) {
             if (key->down) {
                 key->down = 0;

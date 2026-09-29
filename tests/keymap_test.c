@@ -6,6 +6,7 @@
 
 /* Drive the low-level hook with physical-key event records without installing it. */
 #define TEST_REMINDER_MESSAGE (WM_APP + 6)
+#define TEST_PREVIEW_MESSAGE (WM_APP + 10)
 static UINT_PTR WINAPI mock_set_timer(HWND window, UINT_PTR id, UINT elapse, TIMERPROC callback);
 static BOOL WINAPI mock_kill_timer(HWND window, UINT_PTR id);
 static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size);
@@ -36,6 +37,9 @@ static size_t send_calls;
 static int mock_caps_lock_on;
 static ULONGLONG now_ms;
 static unsigned int reminder_posts;
+static WPARAM preview_indices[16];
+static LPARAM preview_states[16];
+static size_t preview_event_count;
 static UINT_PTR active_timer_id;
 static UINT active_timer_delay;
 static unsigned char mock_os_key_down[256];
@@ -68,6 +72,12 @@ static BOOL WINAPI mock_post_message(HWND window, UINT message, WPARAM wparam, L
     (void)lparam;
     if (message == TEST_REMINDER_MESSAGE)
         ++reminder_posts;
+    if (message == TEST_PREVIEW_MESSAGE) {
+        assert(preview_event_count < sizeof(preview_indices) / sizeof(preview_indices[0]));
+        preview_indices[preview_event_count] = wparam;
+        preview_states[preview_event_count] = lparam;
+        ++preview_event_count;
+    }
     return TRUE;
 }
 
@@ -926,6 +936,29 @@ int main(void)
     key_event(VK_DELETE, WM_KEYUP);
     assert(keymap_get_hold_hotkey().modifiers == 0 && keymap_get_hold_hotkey().key == 0);
     keymap_set_hold_hotkey((keymap_hotkey){0, 0});
+
+    keymap_set_preview_message(TEST_PREVIEW_MESSAGE);
+    keymap_set_preview_enabled(1);
+    keymap_set_enabled(0);
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(preview_event_count == 2);
+    assert(preview_indices[0] == 6 && preview_states[0] == 1);
+    assert(preview_indices[1] == 6 && preview_states[1] == 0);
+
+    modifier(VK_LCONTROL, 1);
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    modifier(VK_LCONTROL, 0);
+    assert(preview_event_count == 2);
+
+    keymap_set_enabled(1);
+    key_event('O', WM_KEYDOWN);
+    key_event('O', WM_KEYUP);
+    assert(preview_event_count == 4);
+    assert(preview_indices[2] == 2 && preview_states[2] == 1);
+    assert(preview_indices[3] == 2 && preview_states[3] == 0);
+    keymap_set_preview_enabled(0);
 
     puts("keymap tests passed");
     return 0;

@@ -101,6 +101,9 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
     case WM_OFFSET_PAD_EFFECTIVE_CHANGED:
         ui_refresh();
         return 0;
+    case WM_OFFSET_PAD_KEY_PREVIEW:
+        ui_key_preview((size_t)wparam, lparam != 0);
+        return 0;
     case WM_OFFSET_PAD_HOLD_CAPTURE_DONE:
         ui_hotkey_capture_result(wparam);
         if (wparam == KEYMAP_CAPTURE_SAVED &&
@@ -237,6 +240,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     keymap_set_effective_changed_message(WM_OFFSET_PAD_EFFECTIVE_CHANGED);
     keymap_set_source_capture_message(WM_OFFSET_PAD_SOURCE_CAPTURE_DONE);
     keymap_set_reminder_message(WM_OFFSET_PAD_MODE_REMINDER);
+    keymap_set_preview_message(WM_OFFSET_PAD_KEY_PREVIEW);
     if (!ui_init(instance, main_window, light_icon, dark_icon,
                  tray_o_icon, tray_9_icon, &actions)) {
         exit_code = 1;
