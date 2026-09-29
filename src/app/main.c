@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <wchar.h>
 
 #include "app_settings.h"
@@ -17,6 +18,24 @@ static HWND main_window;
 static UINT taskbar_created;
 static int restart_background;
 
+static void read_command_line_options(int *background, int *skip_update_check)
+{
+    int count = 0;
+    int index;
+    wchar_t **arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    *background = 0;
+    *skip_update_check = 0;
+    if (arguments == NULL)
+        return;
+    for (index = 1; index < count; ++index) {
+        if (_wcsicmp(arguments[index], L"--background") == 0)
+            *background = 1;
+        else if (_wcsicmp(arguments[index], L"--skip-update-check") == 0)
+            *skip_update_check = 1;
+    }
+    LocalFree(arguments);
+}
+
 static void set_enabled(int enabled)
 {
     keymap_set_enabled(enabled);
@@ -25,6 +44,7 @@ static void set_enabled(int enabled)
 
 static void quit_app(void)
 {
+    update_check_stop();
     if (main_window != NULL)
         DestroyWindow(main_window);
 }
@@ -117,7 +137,7 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_refresh();
         return 0;
     case WM_CLOSE:
-        DestroyWindow(window);
+        quit_app();
         return 0;
     case WM_DESTROY:
         main_window = NULL;
@@ -142,12 +162,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     MSG message;
     DWORD sources[KEYMAP_KEY_COUNT];
     int result;
-    int background = wcsstr(GetCommandLineW(), L"--background") != NULL;
-    int skip_update_check = wcsstr(GetCommandLineW(), L"--skip-update-check") != NULL;
+    int background = 0;
+    int skip_update_check = 0;
     int exit_code = 0;
     (void)previous;
     (void)command_line;
     (void)show_command;
+    read_command_line_options(&background, &skip_update_check);
 
     singleton = CreateMutexW(NULL, TRUE, L"Local\\Offset Pad.SingleInstance");
     if (singleton == NULL) {
@@ -237,10 +258,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     }
     if (result < 0)
         exit_code = 1;
+    update_check_stop();
     keymap_uninstall();
 cleanup_ui:
     ui_shutdown();
 cleanup_window:
+    update_check_stop();
     if (main_window != NULL)
         DestroyWindow(main_window);
 cleanup_class:

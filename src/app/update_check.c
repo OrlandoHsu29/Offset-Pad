@@ -1,7 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winhttp.h>
-#include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 
 #include "update_check.h"
@@ -13,27 +13,39 @@ typedef struct update_check_context {
     char current_version[32];
 } update_check_context;
 
+static SRWLOCK update_check_lock = SRWLOCK_INIT;
+static HWND update_check_target;
+static int update_check_started;
+static int update_check_stopping;
+
 static int parse_version(const char *text, unsigned long parts[3])
 {
-    int index;
     const char *cursor = text;
+    int index;
     if (cursor == NULL)
         return 0;
     if (*cursor == 'v' || *cursor == 'V')
         ++cursor;
     for (index = 0; index < 3; ++index) {
-        char *end;
-        parts[index] = strtoul(cursor, &end, 10);
-        if (end == cursor)
+        unsigned long value = 0;
+        if (*cursor < '0' || *cursor > '9')
             return 0;
-        cursor = end;
+        do {
+            unsigned int digit = (unsigned int)(*cursor - '0');
+            if (value > (ULONG_MAX - digit) / 10)
+                return 0;
+            value = value * 10 + digit;
+            ++cursor;
+        } while (*cursor >= '0' && *cursor <= '9');
+        parts[index] = value;
         if (index != 2) {
             if (*cursor != '.')
                 return 0;
             ++cursor;
         }
     }
-    return *cursor == '\0' || *cursor == '-' || *cursor == '+';
+    /* Compare stable numeric release tags only; ignore malformed/prerelease tags. */
+    return *cursor == '\0';
 }
 
 static int version_is_newer(const char *candidate, const char *current)
@@ -131,9 +143,16 @@ static DWORD WINAPI update_check_thread(void *parameter)
         wchar_t *version = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, 64 * sizeof(wchar_t));
         if (version != NULL) {
             int chars = MultiByteToWideChar(CP_UTF8, 0, tag, -1, version, 64);
-            if (chars > 0 && PostMessageW(context->target_window,
-                                          WM_OFFSET_PAD_UPDATE_AVAILABLE,
-                                          (WPARAM)version, 0))
+            int posted = 0;
+            if (chars > 0) {
+                AcquireSRWLockExclusive(&update_check_lock);
+                if (!update_check_stopping &&
+                    PostMessageW(context->target_window, WM_OFFSET_PAD_UPDATE_AVAILABLE,
+                                 (WPARAM)version, 0))
+                    posted = 1;
+                ReleaseSRWLockExclusive(&update_check_lock);
+            }
+            if (posted)
                 version = NULL;
             if (version != NULL)
                 HeapFree(GetProcessHeap(), 0, version);
@@ -156,12 +175,42 @@ void update_check_start(HWND target_window, const char *current_version)
     context = (update_check_context *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*context));
     if (context == NULL)
         return;
+    AcquireSRWLockExclusive(&update_check_lock);
+    if (update_check_started) {
+        ReleaseSRWLockExclusive(&update_check_lock);
+        HeapFree(GetProcessHeap(), 0, context);
+        return;
+    }
+    update_check_started = 1;
+    update_check_stopping = 0;
+    update_check_target = target_window;
+    ReleaseSRWLockExclusive(&update_check_lock);
     context->target_window = target_window;
     lstrcpynA(context->current_version, current_version, sizeof(context->current_version));
     thread = CreateThread(NULL, 0, update_check_thread, context, 0, NULL);
     if (thread == NULL) {
+        AcquireSRWLockExclusive(&update_check_lock);
+        update_check_stopping = 1;
+        update_check_target = NULL;
+        ReleaseSRWLockExclusive(&update_check_lock);
         HeapFree(GetProcessHeap(), 0, context);
         return;
     }
     CloseHandle(thread);
+}
+
+void update_check_stop(void)
+{
+    HWND target;
+    MSG message;
+    AcquireSRWLockExclusive(&update_check_lock);
+    update_check_stopping = 1;
+    target = update_check_target;
+    update_check_target = NULL;
+    ReleaseSRWLockExclusive(&update_check_lock);
+    if (target == NULL)
+        return;
+    while (PeekMessageW(&message, target, WM_OFFSET_PAD_UPDATE_AVAILABLE,
+                        WM_OFFSET_PAD_UPDATE_AVAILABLE, PM_REMOVE))
+        HeapFree(GetProcessHeap(), 0, (void *)message.wParam);
 }
