@@ -1257,7 +1257,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
         if (caps_action == CAPS_PRESS_PENDING &&
             caps_restore == CAPS_RESTORE_ARMED &&
-            GetTickCount64() - caps_press_started >= KEYMAP_CAPS_PREVIEW_DELAY_MS)
+            GetTickCount64() - caps_press_started >= KEYMAP_CAPS_LONG_HOLD_DELAY_MS)
             caps_restore = CAPS_RESTORE_ON_RELEASE;
         caps_press_started = 0;
         cancel_caps_preview();

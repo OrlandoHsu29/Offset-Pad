@@ -282,6 +282,7 @@ int main(void)
     assert(caps_event(1) == 0);
     assert(!keymap_is_enabled() && !keymap_is_visual_enabled());
     assert(active_timer_id == KEYMAP_CAPS_PREVIEW_TIMER_ID);
+    assert(active_timer_delay == KEYMAP_CAPS_PREVIEW_DELAY_MS);
     assert(caps_event(0) == 0);
     assert(!keymap_is_visual_enabled());
 
@@ -291,6 +292,7 @@ int main(void)
     now_ms += KEYMAP_CAPS_PREVIEW_DELAY_MS;
     keymap_handle_timer(KEYMAP_CAPS_PREVIEW_TIMER_ID);
     assert(!keymap_is_enabled() && keymap_is_visual_enabled());
+    now_ms += KEYMAP_CAPS_LONG_HOLD_DELAY_MS - KEYMAP_CAPS_PREVIEW_DELAY_MS;
     assert(caps_event(0) == 0);
     assert(!keymap_is_enabled() && !keymap_is_visual_enabled());
     assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
@@ -298,7 +300,7 @@ int main(void)
     assert(!mock_caps_lock_on);
     /* Elapsed time still restores Caps if the preview timer dispatch was delayed. */
     assert(caps_event(1) == 0 && mock_caps_lock_on);
-    now_ms += KEYMAP_CAPS_PREVIEW_DELAY_MS;
+    now_ms += KEYMAP_CAPS_LONG_HOLD_DELAY_MS;
     assert(caps_event(0) == 0);
     assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
     keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
@@ -370,7 +372,7 @@ int main(void)
     defer_compensation_timer_for_test = 1;
     assert(caps_event(1) == 0 && mock_caps_lock_on);
     modifier(VK_LSHIFT, 1);
-    assert(keymap_is_enabled());
+    assert(keymap_is_enabled() && keymap_is_visual_enabled());
     assert(captured_modifiers[4]);
     assert(caps_event(0) == 0);
     assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
@@ -417,7 +419,7 @@ int main(void)
     assert(caps_event(0) == 0);
     modifier(VK_LSHIFT, 1);
     assert(key_event(VK_SPACE, WM_KEYDOWN) == 1);
-    assert(keymap_is_enabled());
+    assert(keymap_is_enabled() && keymap_is_visual_enabled());
     key_event(VK_SPACE, WM_KEYUP);
     modifier(VK_LSHIFT, 0);
     keymap_set_enabled(0);
