@@ -207,7 +207,11 @@ int main(void)
     assert(!same_hotkey((keymap_hotkey){KEYMAP_MOD_LCTRL, 'K'},
                         (keymap_hotkey){KEYMAP_MOD_RCTRL, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0}));
-    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 'K'}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT | KEYMAP_MOD_CTRL, 0}));
+    assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}) ==
+           KEYMAP_CAPTURE_INVALID_ALT);
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
     assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 0}) ==
            KEYMAP_CAPTURE_INVALID_COUNT);
@@ -219,10 +223,26 @@ int main(void)
                          (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
     assert(wcscmp(name, L"Caps + Shift") == 0);
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN, 'K'}));
-    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) &&
+    assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL) &&
            keymap_get_hotkey().key == 0);
     assert(keymap_get_hold_hotkey().modifiers == KEYMAP_MOD_CAPS &&
            keymap_get_hold_hotkey().key == 0);
+
+    /* Default Ctrl+Caps Lock toggles in either press order. */
+    keymap_set_enabled(0);
+    modifier(VK_LCONTROL, 1);
+    assert(caps_event(1) == 1 && keymap_is_enabled());
+    assert(caps_event(0) == 1);
+    modifier(VK_LCONTROL, 0);
+    keymap_set_enabled(0);
+    assert(caps_event(1) == 0);
+    modifier(VK_LCONTROL, 1);
+    assert(keymap_is_enabled());
+    modifier(VK_LCONTROL, 0);
+    assert(caps_event(0) == 0);
+    if (active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID)
+        keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    keymap_set_enabled(0);
 
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
                        (keymap_hotkey){KEYMAP_MOD_CTRL, 'K'});

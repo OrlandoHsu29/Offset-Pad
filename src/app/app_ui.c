@@ -978,7 +978,7 @@ void ui_hotkey_capture_result(WPARAM result)
     switch (result) {
     case KEYMAP_CAPTURE_INVALID_ALT:
         lstrcpynW(hotkey_capture_status,
-                  L"不支持 Alt+字符/Shift：会导致文本框失去聚焦",
+                  L"不支持 Alt+单键/Alt+Shift/Alt+Caps：易失焦",
                   (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
         break;
     case KEYMAP_CAPTURE_INVALID_COUNT:

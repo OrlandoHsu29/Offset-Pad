@@ -92,7 +92,7 @@ static int hold_modifiers_suspended;
 static int backspace_synthetic_down;
 static unsigned char hold_swallowed_keys[32];
 static unsigned char passed_keys[32];
-static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT, 0};
+static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL, 0};
 static keymap_hotkey hold_hotkey = {KEYMAP_MOD_CAPS, 0};
 static int hold_provisional;
 static int hold_timer_active;
@@ -870,6 +870,9 @@ static int alt_shortcut_is_unsafe(keymap_hotkey value)
     /* Ctrl-containing Alt chords are allowed; only the known disruptive forms are blocked. */
     if ((value.modifiers & KEYMAP_MOD_CTRL_ANY) != 0)
         return 0;
+    if ((value.modifiers & KEYMAP_MOD_ALT_ANY) != 0 &&
+        (value.modifiers & KEYMAP_MOD_CAPS) != 0)
+        return 1;
     return (value.key != 0 &&
             only_modifier_families(value.modifiers, KEYMAP_MOD_ALT_ANY)) ||
            (value.key == 0 &&
