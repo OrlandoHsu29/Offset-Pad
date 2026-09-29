@@ -950,16 +950,26 @@ void ui_show_mode_reminder(void)
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
-void ui_show_update_available(const wchar_t *version)
+static void set_update_available_indicator(void)
 {
-    NOTIFYICONDATAW data = {0};
-    if (version == NULL)
-        return;
     update_available = 1;
     if (update_link_button != NULL) {
         ShowWindow(update_link_button, SW_SHOWNA);
         InvalidateRect(update_link_button, NULL, FALSE);
     }
+}
+
+void ui_restore_update_available(void)
+{
+    set_update_available_indicator();
+}
+
+void ui_show_update_available(const wchar_t *version)
+{
+    NOTIFYICONDATAW data = {0};
+    if (version == NULL)
+        return;
+    set_update_available_indicator();
     if (!tray_added)
         return;
     update_notice_active = 1;

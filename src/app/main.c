@@ -112,8 +112,10 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         ui_show_mode_reminder();
         return 0;
     case WM_OFFSET_PAD_UPDATE_AVAILABLE:
-        if (settings_load_auto_updates())
+        if (settings_load_auto_updates()) {
+            settings_cache_update_available(OFFSET_PAD_VERSION_W);
             ui_show_update_available((const wchar_t *)wparam);
+        }
         HeapFree(GetProcessHeap(), 0, (void *)wparam);
         return 0;
     case WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE:
@@ -246,6 +248,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
         exit_code = 1;
         goto cleanup_ui;
     }
+    if (settings_update_was_available(OFFSET_PAD_VERSION_W))
+        ui_restore_update_available();
     if (settings_load_auto_updates() && !skip_update_check)
         update_check_start(main_window, OFFSET_PAD_VERSION_A);
     if (!background)

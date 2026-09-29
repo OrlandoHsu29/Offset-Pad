@@ -89,7 +89,80 @@ int settings_save_auto_updates(int enabled)
 {
     return save_dword(L"AutoUpdates", enabled != 0);
 }
+#define UPDATE_CACHE_VALUE L"UpdateAvailable"
+#define UPDATE_CACHE_FOR_VALUE L"UpdateAvailableForVersion"
 
+static int load_registry_string(HKEY key, const wchar_t *name,
+                                wchar_t *buffer, size_t capacity)
+{
+    DWORD type = 0;
+    DWORD size = 0;
+    size_t chars;
+    if (RegQueryValueExW(key, name, NULL, &type, NULL, &size) != ERROR_SUCCESS ||
+        type != REG_SZ || size < sizeof(wchar_t) ||
+        size % sizeof(wchar_t) != 0 || size > capacity * sizeof(wchar_t))
+        return 0;
+    if (RegQueryValueExW(key, name, NULL, &type, (BYTE *)buffer, &size) != ERROR_SUCCESS ||
+        type != REG_SZ || size < sizeof(wchar_t) || size % sizeof(wchar_t) != 0)
+        return 0;
+    chars = size / sizeof(wchar_t);
+    return buffer[chars - 1] == L'\0' && wcslen(buffer) == chars - 1;
+}
+
+static void clear_update_cache(HKEY key)
+{
+    RegDeleteValueW(key, UPDATE_CACHE_VALUE);
+    RegDeleteValueW(key, UPDATE_CACHE_FOR_VALUE);
+}
+
+int settings_update_was_available(const wchar_t *current_version)
+{
+    HKEY key;
+    DWORD available = 0;
+    DWORD type = 0;
+    DWORD size = sizeof(available);
+    wchar_t cached_for[32];
+    int valid;
+    if (current_version == NULL || wcslen(current_version) >= 32 ||
+        RegOpenKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0,
+                      KEY_QUERY_VALUE | KEY_SET_VALUE, &key) != ERROR_SUCCESS)
+        return 0;
+    valid = RegQueryValueExW(key, UPDATE_CACHE_VALUE, NULL, &type,
+                             (BYTE *)&available, &size) == ERROR_SUCCESS &&
+            type == REG_DWORD && size == sizeof(available) && available == 1 &&
+            load_registry_string(key, UPDATE_CACHE_FOR_VALUE, cached_for,
+                                 sizeof(cached_for) / sizeof(cached_for[0])) &&
+            wcscmp(cached_for, current_version) == 0;
+    if (!valid)
+        clear_update_cache(key);
+    RegCloseKey(key);
+    return valid;
+}
+
+int settings_cache_update_available(const wchar_t *current_version)
+{
+    HKEY key;
+    DWORD available = 1;
+    DWORD size;
+    LONG result;
+    size_t length;
+    if (current_version == NULL || (length = wcslen(current_version)) == 0 || length >= 32)
+        return 0;
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, PREFS_KEY, 0, NULL, 0,
+                             KEY_SET_VALUE, NULL, &key, NULL);
+    if (result != ERROR_SUCCESS)
+        return 0;
+    size = (DWORD)((length + 1) * sizeof(wchar_t));
+    result = RegSetValueExW(key, UPDATE_CACHE_FOR_VALUE, 0, REG_SZ,
+                            (const BYTE *)current_version, size);
+    if (result == ERROR_SUCCESS)
+        result = RegSetValueExW(key, UPDATE_CACHE_VALUE, 0, REG_DWORD,
+                                (const BYTE *)&available, sizeof(available));
+    if (result != ERROR_SUCCESS)
+        clear_update_cache(key);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS;
+}
 keymap_hotkey settings_default_hotkey(void)
 {
     keymap_hotkey value = {DEFAULT_HOTKEY >> 16, DEFAULT_HOTKEY & 0xFFFFU};

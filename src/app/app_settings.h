@@ -7,6 +7,8 @@ int settings_load_hotkeys_enabled(void);
 int settings_save_hotkeys_enabled(int enabled);
 int settings_load_auto_updates(void);
 int settings_save_auto_updates(int enabled);
+int settings_update_was_available(const wchar_t *current_version);
+int settings_cache_update_available(const wchar_t *current_version);
 int settings_load_block_letters(void);
 int settings_save_block_letters(int enabled);
 int settings_autostart_enabled(void);

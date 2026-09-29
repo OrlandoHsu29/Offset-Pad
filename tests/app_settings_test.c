@@ -6,8 +6,8 @@
 #include <wchar.h>
 
 #define TEST_PREFS_KEY L"Software\\Offset Pad"
-#define TEST_VALUE_COUNT 8
-#define TEST_VALUE_SIZE 16
+#define TEST_VALUE_COUNT 16
+#define TEST_VALUE_SIZE 128
 #define TEST_KEY ((HKEY)(ULONG_PTR)1)
 
 typedef struct test_value {
@@ -192,6 +192,12 @@ int main(void)
     assert(settings_default_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
     assert(settings_default_hold_hotkey().modifiers == KEYMAP_MOD_CAPS);
 
+    assert(!settings_update_was_available(L"0.2.6"));
+    assert(settings_cache_update_available(L"0.2.6"));
+    assert(settings_update_was_available(L"0.2.6"));
+    assert(!settings_update_was_available(L"0.2.7"));
+    assert(find_value(L"UpdateAvailable") == NULL);
+    assert(find_value(L"UpdateAvailableForVersion") == NULL);
     hotkey = settings_load_hotkey();
     assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
     assert(hotkey.key == 0);
