@@ -19,7 +19,7 @@ if ($Compiler) {
                     $output = Join-Path $PSScriptRoot 'build'
                     New-Item -ItemType Directory -Path $output -Force | Out-Null
                     $options = if ($Release) { '/O1 /DNDEBUG' } else { '/Od /Zi' }
-                    $commandLine = 'call "{0}" >nul && rc /nologo /fo "build\app-icon.res" "resources\app-icon.rc" && cl /nologo /std:c11 /utf-8 /W4 {1} /DUNICODE /D_UNICODE /I "src\app" /I "src\input" /Fd:"build\Offset Pad-compiler.pdb" "src\app\main.c" "src\app\app_settings.c" "src\app\app_ui.c" "src\app\update_check.c" "src\app\rounded_box.c" "src\input\keymap.c" "build\app-icon.res" /Fe:"build\Offset Pad.exe" /Fo:"build\\" /link /SUBSYSTEM:WINDOWS user32.lib shell32.lib advapi32.lib gdi32.lib dwmapi.lib gdiplus.lib winhttp.lib comctl32.lib' -f $vcvars, $options
+                    $commandLine = 'call "{0}" >nul && rc /nologo /fo "build\app-icon.res" "resources\app-icon.rc" && cl /nologo /std:c11 /utf-8 /W4 {1} /DUNICODE /D_UNICODE /I "src\app" /I "src\app\ui" /I "src\input" /Fd:"build\Offset Pad-compiler.pdb" "src\app\main.c" "src\app\app_settings.c" "src\app\ui\app_ui.c" "src\app\ui\app_ui_paint.c" "src\app\ui\app_tray.c" "src\app\update_check.c" "src\app\ui\rounded_box.c" "src\input\keymap.c" "build\app-icon.res" /Fe:"build\Offset Pad.exe" /Fo:"build\\" /link /SUBSYSTEM:WINDOWS user32.lib shell32.lib advapi32.lib gdi32.lib dwmapi.lib gdiplus.lib winhttp.lib comctl32.lib' -f $vcvars, $options
                     Push-Location $PSScriptRoot
                     try {
                         & cmd.exe /d /c $commandLine
@@ -60,15 +60,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Icon resource compilation failed.' }
 $sources = @(
     (Join-Path $PSScriptRoot 'src\app\main.c'),
     (Join-Path $PSScriptRoot 'src\app\app_settings.c'),
-    (Join-Path $PSScriptRoot 'src\app\app_ui.c'),
+    (Join-Path $PSScriptRoot 'src\app\ui\app_ui.c'),
+    (Join-Path $PSScriptRoot 'src\app\ui\app_ui_paint.c'),
+    (Join-Path $PSScriptRoot 'src\app\ui\app_tray.c'),
     (Join-Path $PSScriptRoot 'src\app\update_check.c'),
-    (Join-Path $PSScriptRoot 'src\app\rounded_box.c'),
+    (Join-Path $PSScriptRoot 'src\app\ui\rounded_box.c'),
     (Join-Path $PSScriptRoot 'src\input\keymap.c')
 )
 $options = if ($Release) { @('-Os', '-s') } else { @('-O0', '-g') }
 $destination = Join-Path $output 'Offset Pad.exe'
 & $compilerPath -std=c11 -finput-charset=UTF-8 -DUNICODE -D_UNICODE -Wall -Wextra @options `
-    '-Isrc/app' '-Isrc/input' @sources $resource -mwindows -o $destination `
+    '-Isrc/app' '-Isrc/app/ui' '-Isrc/input' @sources $resource -mwindows -o $destination `
     -luser32 -lshell32 -ladvapi32 -lgdi32 -ldwmapi -lgdiplus -lwinhttp -lcomctl32
 if ($LASTEXITCODE -ne 0) { throw 'Offset Pad build failed.' }
 Write-Host "Built $destination"

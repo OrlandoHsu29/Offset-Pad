@@ -43,10 +43,12 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/app -Isrc/input tests\app_
 | 路径 | 职责 |
 | --- | --- |
 | `src/app/main.c` | 单实例、消息循环和后台启动 |
-| `src/app/app_ui.c` | 设置窗口、托盘图标和菜单 |
+| `src/app/ui/app_ui.c` | 设置窗口与界面生命周期 |
+| `src/app/ui/app_ui_paint.c` | 自绘控件与键位预览 |
+| `src/app/ui/app_tray.c` | 托盘图标、菜单和通知 |
 | `src/app/app_settings.c` | 用户设置和开机启动项 |
 | `src/app/update_check.c` | 启动时异步查询 GitHub Releases |
-| `src/app/rounded_box.c` | 圆角控件绘制 |
+| `src/app/ui/rounded_box.c` | 圆角控件绘制 |
 | `src/input/keymap.c` | 快捷键与数字小键盘映射 |
 | `resources/app-icon.rc` | 将窗口和托盘图标嵌入 exe |
 | `installer/offset-pad.iss` | 安装、升级和卸载 |
