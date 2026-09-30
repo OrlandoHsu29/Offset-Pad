@@ -61,12 +61,12 @@ static int save_hotkey(const wchar_t *name, keymap_hotkey value)
     return save_dword(name, (DWORD)((value.modifiers << 16) | value.key));
 }
 
-int settings_load_block_letters(void)
+int settings_load_block_unmapped(void)
 {
     return load_dword(L"BlockLetterInput", 1) != 0;
 }
 
-int settings_save_block_letters(int enabled)
+int settings_save_block_unmapped(int enabled)
 {
     return save_dword(L"BlockLetterInput", enabled != 0);
 }
@@ -207,6 +207,54 @@ int settings_save_hold_hotkey(keymap_hotkey hotkey)
     return save_hotkey(L"HoldHotkey", hotkey);
 }
 
+#define LEGACY_KEYMAP_KEY_COUNT 10
+
+static int sources_valid(const DWORD *sources, size_t count)
+{
+    size_t index;
+    size_t other;
+    for (index = 0; index < count; ++index) {
+        if (!keymap_source_supported(sources[index]))
+            return 0;
+        for (other = 0; other < index; ++other)
+            if (sources[index] == sources[other])
+                return 0;
+    }
+    return 1;
+}
+
+static DWORD choose_decimal_source(const DWORD *sources, size_t count)
+{
+    static const DWORD candidates[] = {
+        VK_OEM_PERIOD, VK_OEM_2, VK_OEM_1, VK_OEM_PLUS, VK_OEM_MINUS,
+        VK_OEM_5, VK_OEM_4, VK_OEM_6, VK_OEM_7, VK_OEM_3
+    };
+    size_t candidate;
+    for (candidate = 0; candidate < sizeof(candidates) / sizeof(candidates[0]); ++candidate) {
+        size_t index;
+        int used = 0;
+        for (index = 0; index < count; ++index)
+            if (sources[index] == candidates[candidate]) {
+                used = 1;
+                break;
+            }
+        if (!used)
+            return candidates[candidate];
+    }
+    for (candidate = 'A'; candidate <= 'Z'; ++candidate) {
+        size_t index;
+        int used = 0;
+        for (index = 0; index < count; ++index)
+            if (sources[index] == candidate) {
+                used = 1;
+                break;
+            }
+        if (!used)
+            return (DWORD)candidate;
+    }
+    return VK_OEM_PERIOD;
+}
+
 int settings_load_sources(DWORD sources[KEYMAP_KEY_COUNT])
 {
     HKEY key;
@@ -221,14 +269,34 @@ int settings_load_sources(DWORD sources[KEYMAP_KEY_COUNT])
         return 0;
     result = RegQueryValueExW(key, L"SourceKeys", NULL, &type, (BYTE *)stored, &size);
     RegCloseKey(key);
-    if (result != ERROR_SUCCESS || type != REG_BINARY ||
-        (size != sizeof(DWORD) * KEYMAP_KEY_COUNT && size != sizeof(stored)))
+    if (result != ERROR_SUCCESS || type != REG_BINARY)
         return 0;
-    for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
-        sources[index] = stored[index];
-    return 1;
-}
 
+    if (size == sizeof(DWORD) * KEYMAP_KEY_COUNT) {
+        for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
+            sources[index] = stored[index];
+        if (sources_valid(sources, KEYMAP_KEY_COUNT))
+            return 1;
+        for (index = 0; index < LEGACY_KEYMAP_KEY_COUNT; ++index)
+            sources[index] = stored[index];
+        if (!sources_valid(sources, LEGACY_KEYMAP_KEY_COUNT))
+            return 0;
+        sources[KEYMAP_KEY_COUNT - 1] = choose_decimal_source(
+            sources, LEGACY_KEYMAP_KEY_COUNT);
+        return 1;
+    }
+    if (size == sizeof(DWORD) * LEGACY_KEYMAP_KEY_COUNT ||
+        size == sizeof(stored)) {
+        for (index = 0; index < LEGACY_KEYMAP_KEY_COUNT; ++index)
+            sources[index] = stored[index];
+        if (!sources_valid(sources, LEGACY_KEYMAP_KEY_COUNT))
+            return 0;
+        sources[KEYMAP_KEY_COUNT - 1] = choose_decimal_source(
+            sources, LEGACY_KEYMAP_KEY_COUNT);
+        return 1;
+    }
+    return 0;
+}
 int settings_save_sources(const DWORD sources[KEYMAP_KEY_COUNT])
 {
     HKEY key;

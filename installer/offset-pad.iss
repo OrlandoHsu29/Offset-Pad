@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.6"
+  #define MyAppVersion "0.2.7"
 #endif
 
 #define MyAppName "Offset Pad"

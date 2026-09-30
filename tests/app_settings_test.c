@@ -186,12 +186,33 @@ int main(void)
     DWORD previous_ctrl_default_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_CTRL) << 16;
     DWORD old_alt_caps_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT) << 16;
     DWORD previous_default_hold_hotkey = KEYMAP_MOD_CAPS << 16;
+    DWORD migrated_sources[KEYMAP_KEY_COUNT];
+    DWORD legacy_sources[10] = {
+        'U', 'I', 'O', 'J', 'K', 'L', 'N', 'M', VK_OEM_COMMA, VK_SPACE
+    };
 
     ZeroMemory(values, sizeof(values));
-    assert(settings_load_block_letters());
+    assert(settings_load_block_unmapped());
     assert(settings_load_hotkeys_enabled());
     assert(settings_default_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
     assert(settings_default_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+
+    set_raw_value(L"SourceKeys", REG_BINARY, (const BYTE *)legacy_sources,
+                  sizeof(legacy_sources));
+    assert(settings_load_sources(migrated_sources));
+    assert(migrated_sources[0] == 'U' && migrated_sources[9] == VK_SPACE &&
+           migrated_sources[10] == VK_OEM_PERIOD);
+    assert(settings_save_sources(migrated_sources));
+    {
+        test_value *saved = find_value(L"SourceKeys");
+        assert(saved != NULL && saved->size == sizeof(DWORD) * KEYMAP_KEY_COUNT);
+    }
+    legacy_sources[0] = VK_OEM_PERIOD;
+    set_raw_value(L"SourceKeys", REG_BINARY, (const BYTE *)legacy_sources,
+                  sizeof(legacy_sources));
+    assert(settings_load_sources(migrated_sources));
+    assert(migrated_sources[0] == VK_OEM_PERIOD &&
+           migrated_sources[10] != VK_OEM_PERIOD);
 
     assert(!settings_update_was_available(L"0.2.6"));
     assert(settings_cache_update_available(L"0.2.6"));
@@ -254,10 +275,10 @@ int main(void)
         assert(persisted == ((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16));
     }
 
-    assert(settings_save_block_letters(0));
-    assert(!settings_load_block_letters());
-    assert(settings_save_block_letters(-1));
-    assert(settings_load_block_letters());
+    assert(settings_save_block_unmapped(0));
+    assert(!settings_load_block_unmapped());
+    assert(settings_save_block_unmapped(-1));
+    assert(settings_load_block_unmapped());
 
     assert(settings_save_hotkeys_enabled(0));
     assert(!settings_load_hotkeys_enabled());
@@ -282,7 +303,7 @@ int main(void)
     assert(hotkey.modifiers == 0 && hotkey.key == 0);
 
     set_raw_value(L"BlockLetterInput", REG_SZ, (const BYTE *)&malformed, sizeof(malformed));
-    assert(settings_load_block_letters());
+    assert(settings_load_block_unmapped());
     set_raw_value(L"HotkeysEnabled", REG_DWORD, (const BYTE *)&malformed, sizeof(malformed) - 1);
     assert(settings_load_hotkeys_enabled());
     set_raw_value(L"ToggleHotkey", REG_SZ, (const BYTE *)&malformed, sizeof(malformed));

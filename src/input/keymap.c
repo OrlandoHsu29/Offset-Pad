@@ -47,7 +47,8 @@ static mapped_key keys[KEYMAP_KEY_COUNT] = {
     {'O', L'9', 0, 0, 0, 0}, {'J', L'4', 0, 0, 0, 0},
     {'K', L'5', 0, 0, 0, 0}, {'L', L'6', 0, 0, 0, 0},
     {'N', L'1', 0, 0, 0, 0}, {'M', L'2', 0, 0, 0, 0},
-    {VK_OEM_COMMA, L'3', 0, 0, 0, 0}, {VK_SPACE, L'0', 0, 0, 0, 0}
+    {VK_OEM_COMMA, L'3', 0, 0, 0, 0}, {VK_SPACE, L'0', 0, 0, 0, 0},
+    {VK_OEM_PERIOD, L'.', 0, 0, 0, 0}
 };
 
 static HHOOK hook;
@@ -69,10 +70,12 @@ static int enabled;
 static int hotkeys_enabled = 1;
 static int hold_active;
 static int hold_key_down;
-static int block_letters;
-static unsigned int blocked_letter_keys;
-static unsigned int passed_letter_keys;
+static int block_unmapped_keys;
+static unsigned char blocked_character_keys[32];
 static unsigned char modifiers[TRACKED_MODIFIER_COUNT];
+static unsigned char top_number_down[10];
+static unsigned char top_number_swallow_up[10];
+static const wchar_t shifted_number_symbols[] = L")!@#$%^&*(";
 static unsigned char captured_modifiers[TRACKED_MODIFIER_COUNT];
 static unsigned int capture_modifiers_seen;
 static DWORD capture_key_pending;
@@ -410,12 +413,16 @@ static void complete_caps_restore(void)
     restore_caps_lock_after_release();
 }
 
-static int is_symbol_key(DWORD key)
+static int is_character_key(DWORD key)
 {
-    return (key >= VK_OEM_1 && key <= VK_OEM_8) || key == VK_OEM_102;
+    return (key >= 'A' && key <= 'Z') ||
+           (key >= '0' && key <= '9') ||
+           (key >= VK_NUMPAD0 && key <= VK_NUMPAD9) ||
+           key == VK_SPACE || key == VK_MULTIPLY || key == VK_ADD ||
+           key == VK_SEPARATOR || key == VK_SUBTRACT || key == VK_DECIMAL ||
+           key == VK_DIVIDE || (key >= VK_OEM_1 && key <= VK_OEM_8) ||
+           key == VK_OEM_102;
 }
-
-
 static int caps_press_was_passed(void)
 {
     return caps_restore == CAPS_RESTORE_ARMED ||
@@ -523,7 +530,6 @@ static void release_passed_keys(void)
     if (count != 0)
         SendInput(count, input, sizeof(input[0]));
     ZeroMemory(passed_keys, sizeof(passed_keys));
-    passed_letter_keys = 0;
 }
 
 static void sync_hold_input_layer(void)
@@ -546,11 +552,11 @@ static void sync_hold_input_layer(void)
     }
 }
 
-static void send_digit(WORD digit)
+static void send_character(WORD character)
 {
     INPUT input[2] = {0};
     input[0].type = INPUT_KEYBOARD;
-    input[0].ki.wScan = digit;
+    input[0].ki.wScan = character;
     input[0].ki.dwFlags = KEYEVENTF_UNICODE;
     input[1] = input[0];
     input[1].ki.dwFlags |= KEYEVENTF_KEYUP;
@@ -680,14 +686,14 @@ int keymap_is_latched(void)
     return enabled;
 }
 
-void keymap_set_block_letters(int value)
+void keymap_set_block_unmapped(int value)
 {
-    block_letters = value != 0;
+    block_unmapped_keys = value != 0;
 }
 
-int keymap_block_letters_enabled(void)
+int keymap_block_unmapped_enabled(void)
 {
-    return block_letters;
+    return block_unmapped_keys;
 }
 
 int keymap_source_supported(DWORD source)
@@ -1063,6 +1069,15 @@ size_t keymap_capturing_source(void)
 static void release_mapped_keys(void)
 {
     size_t index;
+    size_t number;
+
+    for (number = 0; number < 10; ++number) {
+        if (top_number_down[number]) {
+            top_number_down[number] = 0;
+            top_number_swallow_up[number] = 1;
+        }
+    }
+
     for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
         if (keys[index].down) {
             keys[index].down = 0;
@@ -1277,6 +1292,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         if (hold_suppressed_until_release && hold_hotkey.modifiers != 0 &&
             !modifiers_contain(mask, hold_hotkey.modifiers))
             hold_suppressed_until_release = 0;
+
         if (hold_provisional) {
             if (released &&
                 !modifiers_contain(mask, hold_hotkey.modifiers)) {
@@ -1372,6 +1388,15 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         return CallNextHookEx(hook, code, message, parameter);
     }
 
+    if (event->vkCode < 256) {
+        unsigned char key_mask = (unsigned char)(1U << (event->vkCode & 7U));
+        unsigned char *key_byte = &blocked_character_keys[event->vkCode >> 3];
+        if (*key_byte & key_mask) {
+            if (released)
+                *key_byte &= (unsigned char)~key_mask;
+            return 1;
+        }
+    }
     if (hold_provisional) {
         if (hotkeys_enabled && !block_hotkey_until_clear && hold_active &&
             modifiers_contain(active_modifiers(), hold_hotkey.modifiers)) {
@@ -1381,7 +1406,8 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             set_hold_active(0);
         }
     }
-    if (event->vkCode == VK_BACK && (hold_active || backspace_synthetic_down)) {
+    if (event->vkCode == VK_BACK &&
+        (backspace_synthetic_down || hold_active)) {
         if (!released && hold_active) {
             backspace_synthetic_down = 1;
             sync_hold_input_layer();
@@ -1427,21 +1453,14 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
     }
 
-    if (event->vkCode >= 'A' && event->vkCode <= 'Z') {
-        unsigned int bit = 1U << (event->vkCode - 'A');
-        if (blocked_letter_keys & bit) {
-            if (released)
-                blocked_letter_keys &= ~bit;
-            return 1;
-        }
-        if (passed_letter_keys & bit) {
-            if (released)
-                passed_letter_keys &= ~bit;
+
+    if (event->vkCode < 256) {
+        unsigned char key_mask = (unsigned char)(1U << (event->vkCode & 7U));
+        if (passed_keys[event->vkCode >> 3] & key_mask) {
             track_passed_key(event->vkCode, released);
             return CallNextHookEx(hook, code, message, parameter);
         }
     }
-
     if (event->vkCode == captured_key && captured_key != 0) {
         if (released) {
             for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
@@ -1542,37 +1561,51 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             }
         } else if (keymap_is_enabled()) {
             key->down = 1;
-            send_digit(key->target);
+            send_character(key->target);
             return 1;
         }
         break;
     }
-    if (is_symbol_key(event->vkCode)) {
-        unsigned char symbol_mask = (unsigned char)(1U << (event->vkCode & 7U));
-        int was_passed = (passed_keys[event->vkCode >> 3] & symbol_mask) != 0;
-        if ((!released && hold_active) || (released && was_passed)) {
-            track_passed_key(event->vkCode, released);
-            return CallNextHookEx(hook, code, message, parameter);
+    if (event->vkCode >= '0' && event->vkCode <= '9') {
+        size_t number = event->vkCode - '0';
+        if (top_number_swallow_up[number]) {
+            if (released)
+                top_number_swallow_up[number] = 0;
+            return 1;
+        }
+        if (released) {
+            if (top_number_down[number]) {
+                top_number_down[number] = 0;
+                return 1;
+            }
+        } else if (keymap_is_enabled()) {
+            top_number_down[number] = 1;
+            send_character((WORD)shifted_number_symbols[number]);
+            return 1;
         }
     }
+    if (hold_active && !is_character_key(event->vkCode)) {
+        track_passed_key(event->vkCode, released);
+        return CallNextHookEx(hook, code, message, parameter);
+    }
+    if (hold_active && !released && event->vkCode >= 'A' &&
+        event->vkCode <= 'Z' && keymap_is_enabled() &&
+        !(active_modifiers() & (KEYMAP_MOD_CTRL_SIDES | KEYMAP_MOD_ALT_SIDES | KEYMAP_MOD_WIN_SIDES)))
+        note_unmapped_letter_press();
     if (released ? hold_swallow_key(event->vkCode, 1) :
         (hold_active && hold_swallow_key(event->vkCode, 0))) {
         return 1;
     }
-    if (hold_active && !released && event->vkCode >= 'A' &&
-        event->vkCode <= 'Z')
+    if (!released && event->vkCode >= 'A' && event->vkCode <= 'Z' &&
+        keymap_is_enabled() &&
+        !(active_modifiers() & (KEYMAP_MOD_CTRL_SIDES | KEYMAP_MOD_ALT_SIDES | KEYMAP_MOD_WIN_SIDES)))
         note_unmapped_letter_press();
-    if (!released && event->vkCode >= 'A' && event->vkCode <= 'Z') {
-        unsigned int bit = 1U << (event->vkCode - 'A');
-        if (keymap_is_enabled() &&
-            !(active_modifiers() & (KEYMAP_MOD_CTRL_SIDES | KEYMAP_MOD_ALT_SIDES | KEYMAP_MOD_WIN_SIDES))) {
-            note_unmapped_letter_press();
-            if (block_letters) {
-                blocked_letter_keys |= bit;
-                return 1;
-            }
-        }
-        passed_letter_keys |= bit;
+    if (keymap_is_enabled() && block_unmapped_keys && is_character_key(event->vkCode) &&
+        !(active_modifiers() & (KEYMAP_MOD_CTRL_SIDES | KEYMAP_MOD_ALT_SIDES | KEYMAP_MOD_WIN_SIDES))) {
+        unsigned char key_mask = (unsigned char)(1U << (event->vkCode & 7U));
+        if (!released)
+            blocked_character_keys[event->vkCode >> 3] |= key_mask;
+        return 1;
     }
     track_passed_key(event->vkCode, released);
     return CallNextHookEx(hook, code, message, parameter);
@@ -1630,7 +1663,9 @@ void keymap_uninstall(void)
     }
     ZeroMemory(hold_swallowed_keys, sizeof(hold_swallowed_keys));
     ZeroMemory(passed_keys, sizeof(passed_keys));
-    passed_letter_keys = 0;
+    ZeroMemory(blocked_character_keys, sizeof(blocked_character_keys));
+    ZeroMemory(top_number_down, sizeof(top_number_down));
+    ZeroMemory(top_number_swallow_up, sizeof(top_number_swallow_up));
     keymap_set_enabled(0);
     if (hook != NULL) {
         UnhookWindowsHookEx(hook);

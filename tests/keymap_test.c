@@ -566,8 +566,9 @@ int main(void)
            keymap_capturing_source() == KEYMAP_KEY_COUNT);
 
     keymap_get_sources(defaults);
-    assert(defaults[6] == 'N' && defaults[9] == VK_SPACE);
-    assert(keymap_get_source(10) == 0);
+    assert(defaults[6] == 'N' && defaults[9] == VK_SPACE &&
+           defaults[10] == VK_OEM_PERIOD);
+    assert(keymap_get_source(11) == 0);
     keymap_begin_source_capture(6);
     assert(keymap_is_source_capturing() && keymap_capturing_source() == 6);
     key_event('B', WM_KEYDOWN);
@@ -604,8 +605,13 @@ int main(void)
     assert(!keymap_set_sources(sources));
     assert(keymap_set_sources(defaults));
     assert(keymap_get_source(6) == 'N' && keymap_get_source(3) == 'J');
+    keymap_get_sources(sources);
+    sources[10] = 'U';
+    assert(!keymap_set_sources(sources));
     keymap_format_source(name, sizeof(name) / sizeof(name[0]), VK_SPACE);
     assert(wcscmp(name, L"空格") == 0);
+    keymap_format_source(name, sizeof(name) / sizeof(name[0]), VK_OEM_PERIOD);
+    assert(wcscmp(name, L".") == 0);
 
     keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 'Q'});
     assert(keymap_get_hotkey().modifiers == KEYMAP_MOD_CTRL &&
@@ -655,15 +661,24 @@ int main(void)
     key_event('N', WM_KEYUP);
     assert(sent_count == 4);
 
-    assert(!keymap_block_letters_enabled());
+    assert(!keymap_block_unmapped_enabled());
     keymap_set_enabled(1);
     assert(key_event('A', WM_KEYDOWN) != 1);
-    keymap_set_block_letters(1);
-    assert(keymap_block_letters_enabled());
-    assert(key_event('A', WM_KEYDOWN) != 1);
     assert(key_event('A', WM_KEYUP) != 1);
+    keymap_set_block_unmapped(1);
+    assert(keymap_block_unmapped_enabled());
+    assert(key_event('A', WM_KEYDOWN) == 1);
+    assert(key_event('A', WM_KEYUP) == 1);
     assert(key_event('A', WM_KEYDOWN) == 1);
     assert(key_event('A', WM_KEYDOWN) == 1);
+    assert(key_event(VK_OEM_1, WM_KEYDOWN) == 1);
+    assert(key_event(VK_OEM_1, WM_KEYUP) == 1);
+    assert(key_event(VK_NUMPAD1, WM_KEYDOWN) == 1);
+    assert(key_event(VK_NUMPAD1, WM_KEYUP) == 1);
+    assert(key_event(VK_BACK, WM_KEYDOWN) != 1);
+    assert(key_event(VK_BACK, WM_KEYUP) != 1);
+    assert(key_event(VK_LEFT, WM_KEYDOWN) != 1);
+    assert(key_event(VK_LEFT, WM_KEYUP) != 1);
     keymap_set_enabled(0);
     assert(key_event('A', WM_KEYUP) == 1);
     assert(key_event('A', WM_KEYDOWN) != 1);
@@ -691,7 +706,7 @@ int main(void)
     assert(keymap_set_sources(defaults));
 
     assert(key_event('A', WM_KEYDOWN) == 1);
-    keymap_set_block_letters(0);
+    keymap_set_block_unmapped(0);
     assert(key_event('A', WM_KEYUP) == 1);
     assert(key_event('A', WM_KEYDOWN) != 1);
     assert(key_event('A', WM_KEYUP) != 1);
@@ -805,7 +820,7 @@ int main(void)
     keymap_set_enabled(0);
 
     /* A held shortcut overlays the saved mode, including while keys are mapped. */
-    keymap_set_block_letters(0);
+    keymap_set_block_unmapped(0);
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 'Q'});
     assert(!keymap_is_enabled() && !keymap_is_latched());
     modifier(VK_LCONTROL, 1);
@@ -815,10 +830,20 @@ int main(void)
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
     assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
-    keymap_set_block_letters(1);
-    assert(key_event(VK_OEM_1, WM_KEYDOWN) != 1);
-    assert(key_event(VK_OEM_1, WM_KEYUP) != 1);
-    keymap_set_block_letters(0);
+    keymap_set_block_unmapped(1);
+    assert(key_event(VK_OEM_1, WM_KEYDOWN) == 1);
+    assert(key_event(VK_OEM_1, WM_KEYUP) == 1);
+    assert(key_event(VK_BACK, WM_KEYDOWN) == 1);
+    assert(key_event(VK_BACK, WM_KEYUP) == 1);
+    assert(key_event(VK_RETURN, WM_KEYDOWN) != 1);
+    assert(key_event(VK_RETURN, WM_KEYUP) != 1);
+    assert(key_event(VK_LEFT, WM_KEYDOWN) != 1);
+    assert(key_event(VK_LEFT, WM_KEYUP) != 1);
+    sent_count = 0;
+    assert(key_event('1', WM_KEYDOWN) == 1);
+    assert(key_event('1', WM_KEYUP) == 1);
+    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'!');
+    keymap_set_block_unmapped(0);
 
     modifier(VK_LCONTROL, 0);
     assert(!keymap_is_enabled());
@@ -851,7 +876,7 @@ int main(void)
     keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN, 0});
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 0});
     keymap_set_enabled(0);
-    keymap_set_block_letters(0);
+    keymap_set_block_unmapped(0);
     now_ms += 20000;
     reminders_before_overlap = reminder_posts;
     modifier(VK_LCONTROL, 1);
@@ -945,6 +970,64 @@ int main(void)
     assert(keymap_get_hold_hotkey().modifiers == 0 && keymap_get_hold_hotkey().key == 0);
     keymap_set_hold_hotkey((keymap_hotkey){0, 0});
 
+    /* The top number row emits its Shift symbols only while keypad mode is active. */
+    {
+        static const wchar_t symbols[] = L")!@#$%^&*(";
+        unsigned int number;
+        keymap_set_enabled(0);
+        sent_count = 0;
+        for (number = 0; number < 10; ++number) {
+            DWORD key = '0' + number;
+            assert(key_event(key, WM_KEYDOWN) != 1);
+            assert(key_event(key, WM_KEYUP) != 1);
+        }
+        assert(sent_count == 0);
+
+        keymap_set_enabled(1);
+        for (number = 0; number < 10; ++number) {
+            DWORD key = '0' + number;
+            assert(key_event(key, WM_KEYDOWN) == 1);
+            assert(sent_inputs[number * 2].ki.wScan == symbols[number] &&
+                   sent_inputs[number * 2].ki.dwFlags == KEYEVENTF_UNICODE);
+            assert(key_event(key, WM_KEYUP) == 1);
+            assert(sent_inputs[number * 2 + 1].ki.wScan == symbols[number] &&
+                   sent_inputs[number * 2 + 1].ki.dwFlags ==
+                       (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+        }
+        key_event('1', WM_KEYDOWN);
+        keymap_set_enabled(0);
+        assert(key_event('1', WM_KEYUP) == 1);
+        assert(sent_inputs[20].ki.wScan == L'!');
+        assert(sent_count == 22);
+    }
+    sent_count = 0;
+    assert(key_event(VK_OEM_PERIOD, WM_KEYDOWN) != 1);
+    assert(key_event(VK_OEM_PERIOD, WM_KEYUP) != 1);
+    assert(sent_count == 0);
+    keymap_set_enabled(1);
+    assert(key_event(VK_OEM_PERIOD, WM_KEYDOWN) == 1);
+    assert(key_event(VK_OEM_PERIOD, WM_KEYUP) == 1);
+    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'.');
+    keymap_begin_source_capture(10);
+    assert(key_event('P', WM_KEYDOWN) == 1);
+    assert(keymap_get_source(10) == 'P');
+    assert(key_event('P', WM_KEYUP) == 1);
+    key_event('P', WM_KEYDOWN);
+    key_event('P', WM_KEYUP);
+    assert(sent_count == 4 && sent_inputs[2].ki.wScan == L'.');
+    assert(keymap_set_sources(defaults));
+    keymap_begin_source_capture(6);
+    assert(key_event(VK_OEM_PERIOD, WM_KEYDOWN) == 1);
+    assert(keymap_get_source(6) == VK_OEM_PERIOD && keymap_get_source(10) == 'N');
+    assert(key_event(VK_OEM_PERIOD, WM_KEYUP) == 1);
+    key_event(VK_OEM_PERIOD, WM_KEYDOWN);
+    key_event(VK_OEM_PERIOD, WM_KEYUP);
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(sent_count == 8 && sent_inputs[4].ki.wScan == L'1' &&
+           sent_inputs[6].ki.wScan == L'.');
+    assert(keymap_set_sources(defaults));
+    keymap_set_enabled(0);
     keymap_set_preview_message(TEST_PREVIEW_MESSAGE);
     keymap_set_preview_enabled(1);
     keymap_set_enabled(0);

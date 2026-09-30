@@ -107,6 +107,9 @@ static void paint_settings(HDC dc, const RECT *client)
     } else if (hotkey_capture_status[0] != L'\0') {
         lstrcpynW(hint, hotkey_capture_status,
                   (int)(sizeof(hint) / sizeof(hint[0])));
+    } else if (keymap_is_visual_enabled()) {
+        lstrcpynW(hint, L"小键盘模式下，顶部数字行输出对应符号",
+                  (int)(sizeof(hint) / sizeof(hint[0])));
     } else if (hotkey_is_set(keymap_get_hotkey())) {
         keymap_format_hotkey(shortcut, sizeof(shortcut) / sizeof(shortcut[0]),
                              keymap_get_hotkey());
@@ -183,18 +186,31 @@ static void paint_settings(HDC dc, const RECT *client)
                                 visual_enabled && pressed);
                 }
             } else {
-                int selected = keymap_is_source_capturing() &&
-                               keymap_capturing_source() == 9;
+                int selected_space = keymap_is_source_capturing() &&
+                                     keymap_capturing_source() == 9;
+                int selected_decimal = keymap_is_source_capturing() &&
+                                       keymap_capturing_source() == 10;
                 wchar_t source_label[16];
+                int pressed_space = (pressed_source_keys & (1U << 9)) != 0;
+                int pressed_decimal = (pressed_source_keys & (1U << 10)) != 0;
                 keymap_format_source(source_label,
                                      sizeof(source_label) / sizeof(source_label[0]),
                                      keymap_get_source(9));
-                int pressed = (pressed_source_keys & (1U << 9)) != 0;
-                draw_keycap(dc, 74, top, 103,
-                            selected ? L"按键" : source_label, 0, selected,
-                            hovered_source_key == 9, !visual_enabled && pressed);
-                draw_keycap(dc, 294, top, 66, L"0", 1, 0, 0,
-                            visual_enabled && pressed);
+                draw_keycap(dc, 74, top, 66,
+                            selected_space ? L"\x6309\x952e" : source_label, 0,
+                            selected_space, hovered_source_key == 9,
+                            !visual_enabled && pressed_space);
+                keymap_format_source(source_label,
+                                     sizeof(source_label) / sizeof(source_label[0]),
+                                     keymap_get_source(10));
+                draw_keycap(dc, 148, top, 29,
+                            selected_decimal ? L"?" : source_label, 0,
+                            selected_decimal, hovered_source_key == 10,
+                            !visual_enabled && pressed_decimal);
+                draw_keycap(dc, 275, top, 66, L"0", 1, 0, 0,
+                            visual_enabled && pressed_space);
+                draw_keycap(dc, 349, top, 29, L".", 1, 0, 0,
+                            visual_enabled && pressed_decimal);
             }
             rect = scaled_rect(215, top, 240, top + 24);
             draw_label(dc, L"→", rect, body_font, COLOR_MUTED,
@@ -383,7 +399,7 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
     }
     if (item->CtlID == ID_AUTOSTART || item->CtlID == ID_BLOCK_LETTERS) {
         int enabled = item->CtlID == ID_AUTOSTART ?
-                      settings_autostart_enabled() : keymap_block_letters_enabled();
+                      settings_autostart_enabled() : keymap_block_unmapped_enabled();
         COLORREF track = enabled ? COLOR_ACCENT : COLOR_BORDER;
         RECT knob = rect;
         if (hovered) {
@@ -506,9 +522,36 @@ void app_ui_paint_hint(HDC dc, RECT rect, app_ui_paint_state state)
         text_rect = rect;
         text_rect.bottom -= tail_height;
         InflateRect(&text_rect, -scale(9), -scale(2));
-        draw_label(dc, L"启用小键盘模式后屏蔽未映射的字母键防止误触",
-                   text_rect, compact_font, COLOR_INK,
-                   DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+        {
+            wchar_t hint[] = L"小键盘模式下拦截未映射字符键；\n顶部数字行仍输出对应符号。";
+            wchar_t *second_line = wcschr(hint, L'\n');
+            HGDIOBJ old_font;
+            TEXTMETRIC metrics;
+            RECT line_rect = text_rect;
+            int line_height;
+            int line_gap = scale(4);
+            int group_height;
+            int content_height;
+            if (second_line != NULL)
+                *second_line++ = L'\0';
+            old_font = SelectObject(dc, compact_font != NULL ? compact_font :
+                                    GetStockObject(DEFAULT_GUI_FONT));
+            GetTextMetricsW(dc, &metrics);
+            SelectObject(dc, old_font);
+            line_height = metrics.tmHeight;
+            content_height = text_rect.bottom - text_rect.top;
+            group_height = line_height * 2 + line_gap;
+            line_rect.top = text_rect.top + (content_height - group_height) / 2;
+            line_rect.bottom = line_rect.top + line_height;
+            draw_label(dc, hint, line_rect, compact_font, COLOR_INK,
+                       DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            if (second_line != NULL) {
+                line_rect.top += line_height + line_gap;
+                line_rect.bottom = line_rect.top + line_height;
+                draw_label(dc, second_line, line_rect, compact_font, COLOR_INK,
+                           DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            }
+        }
     } else {
         rounded_bubble_draw(dc, rect, COLOR_TINT, COLOR_BORDER, scale(7),
                             tooltip_tail_center_x, scale(12), tail_height);

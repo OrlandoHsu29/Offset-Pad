@@ -232,7 +232,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
         keymap_set_sources(sources);
     keymap_set_enabled(0);
     keymap_set_hotkeys_enabled(settings_load_hotkeys_enabled());
-    keymap_set_block_letters(settings_load_block_letters());
+    keymap_set_block_unmapped(settings_load_block_unmapped());
     keymap_set_hotkeys(settings_load_hotkey(), settings_load_hold_hotkey());
     keymap_set_capture_message(WM_OFFSET_PAD_HOTKEY_CAPTURE_DONE);
     keymap_set_hold_capture_message(WM_OFFSET_PAD_HOLD_CAPTURE_DONE);

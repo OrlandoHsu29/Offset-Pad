@@ -31,7 +31,7 @@
 #define KEYMAP_MOD_ALL       (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | \
                               KEYMAP_MOD_WIN | KEYMAP_MOD_CAPS | KEYMAP_MOD_SIDE_ALL)
 _Static_assert(KEYMAP_MOD_ALL <= 0xFFFFU, "modifier flags must fit persisted DWORD");
-#define KEYMAP_KEY_COUNT 10
+#define KEYMAP_KEY_COUNT 11
 #define KEYMAP_HOLD_RESOLVE_TIMER_ID 0x4F50U
 #define KEYMAP_CAPS_RELEASE_TIMER_ID 0x4F51U
 #define KEYMAP_CAPS_RELEASE_DELAY_MS 50U
@@ -60,8 +60,8 @@ int keymap_hotkeys_enabled(void);
 void keymap_set_hold_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hold_hotkey(void);
 void keymap_set_hotkeys(keymap_hotkey hotkey, keymap_hotkey hold_hotkey);
-void keymap_set_block_letters(int enabled);
-int keymap_block_letters_enabled(void);
+void keymap_set_block_unmapped(int enabled);
+int keymap_block_unmapped_enabled(void);
 void keymap_set_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hotkey(void);
 int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT]);

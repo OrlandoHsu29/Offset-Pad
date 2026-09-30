@@ -146,7 +146,9 @@ static RECT source_key_rect(size_t index)
     int column;
     int left;
     if (index == 9)
-        return scaled_rect(74, 307, 177, 331);
+        return scaled_rect(74, 307, 140, 331);
+    if (index == 10)
+        return scaled_rect(148, 307, 177, 331);
     row = (int)index / 3;
     column = (int)index % 3;
     left = 74 + (row == 1 ? 11 : 0) + column * 37;
@@ -218,7 +220,7 @@ static LRESULT CALLBACK reset_hint_proc(HWND window, UINT message,
         return;
 
     if (id == ID_BLOCK_LETTERS_TITLE) {
-        lstrcpynW(label, L"启用小键盘模式后屏蔽未映射的字母键防止误触",
+        lstrcpynW(label, L"小键盘模式下拦截未映射字符键；\n顶部数字行仍输出对应符号。",
                   (int)(sizeof(label) / sizeof(label[0])));
     } else {
         lstrcpynW(label, L"重置快捷键",
@@ -232,10 +234,10 @@ static LRESULT CALLBACK reset_hint_proc(HWND window, UINT message,
     GetTextExtentPoint32W(dc, label, (int)wcslen(label), &extent);
     SelectObject(dc, old_font);
     ReleaseDC(tool, dc);
-    width = extent.cx + scale(34);
+    width = id == ID_BLOCK_LETTERS_TITLE ? scale(224) : extent.cx + scale(34);
     if (width < scale(76))
         width = scale(76);
-    height = scale(34);
+    height = id == ID_BLOCK_LETTERS_TITLE ? scale(48) : scale(34);
 
     if (id == ID_BLOCK_LETTERS_TITLE) {
         MONITORINFO monitor_info = {sizeof(monitor_info)};
@@ -574,7 +576,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                                               scale(224), scale(353), scale(176), scale(46),
                                               window, (HMENU)(INT_PTR)ID_HOLD_HOTKEY, instance, NULL);
-        CreateWindowExW(0, L"STATIC", L"屏蔽字母防误触",
+        CreateWindowExW(0, L"STATIC", L"屏蔽未映射字符",
                                               WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
                                               scale(24), scale(409), scale(196), scale(46),
                                               window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS_CARD, instance, NULL);
@@ -763,12 +765,12 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             return 0;
         case ID_BLOCK_LETTERS:
             {
-                int enabled = !keymap_block_letters_enabled();
+                int enabled = !keymap_block_unmapped_enabled();
                 keymap_cancel_capture();
-                if (!settings_save_block_letters(enabled))
-                    show_error(L"无法保存屏蔽字母防误触设置。");
+                if (!settings_save_block_unmapped(enabled))
+                    show_error(L"无法保存屏蔽未映射字符设置。");
                 else
-                    keymap_set_block_letters(enabled);
+                    keymap_set_block_unmapped(enabled);
                 ui_refresh();
                 return 0;
             }
