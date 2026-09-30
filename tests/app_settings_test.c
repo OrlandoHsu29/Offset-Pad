@@ -185,12 +185,13 @@ int main(void)
     DWORD previous_default_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16;
     DWORD previous_ctrl_default_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_CTRL) << 16;
     DWORD old_alt_caps_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT) << 16;
+    DWORD previous_default_hold_hotkey = KEYMAP_MOD_CAPS << 16;
 
     ZeroMemory(values, sizeof(values));
     assert(settings_load_block_letters());
     assert(settings_load_hotkeys_enabled());
     assert(settings_default_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
-    assert(settings_default_hold_hotkey().modifiers == KEYMAP_MOD_CAPS);
+    assert(settings_default_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
 
     assert(!settings_update_was_available(L"0.2.6"));
     assert(settings_cache_update_available(L"0.2.6"));
@@ -238,8 +239,20 @@ int main(void)
     assert(hotkey.key == 0);
 
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == KEYMAP_MOD_CAPS);
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
     assert(hotkey.key == 0);
+    set_raw_value(L"HoldHotkey", REG_DWORD,
+                  (const BYTE *)&previous_default_hold_hotkey,
+                  sizeof(previous_default_hold_hotkey));
+    hotkey = settings_load_hold_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    {
+        test_value *saved = find_value(L"HoldHotkey");
+        DWORD persisted;
+        assert(saved != NULL && saved->size == sizeof(persisted));
+        memcpy(&persisted, saved->data, sizeof(persisted));
+        assert(persisted == ((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16));
+    }
 
     assert(settings_save_block_letters(0));
     assert(!settings_load_block_letters());
@@ -291,9 +304,8 @@ int main(void)
     }
     set_raw_value(L"HoldHotkey", REG_DWORD, (const BYTE *)&malformed, sizeof(malformed) + 1);
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == KEYMAP_MOD_CAPS);
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
     assert(hotkey.key == 0);
-
     assert(settings_save_hotkeys_enabled(1));
     fail_next_write = 1;
     assert(!settings_save_hotkeys_enabled(0));

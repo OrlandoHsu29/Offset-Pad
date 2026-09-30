@@ -235,8 +235,11 @@ int main(void)
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN, 'K'}));
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL) &&
            keymap_get_hotkey().key == 0);
-    assert(keymap_get_hold_hotkey().modifiers == KEYMAP_MOD_CAPS &&
+    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) &&
            keymap_get_hold_hotkey().key == 0);
+    assert(!hold_hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
+    keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS, 0});
+    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
 
     /* Default Ctrl+Caps Lock toggles in either press order. */
     keymap_set_enabled(0);
@@ -254,6 +257,34 @@ int main(void)
         keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
     keymap_set_enabled(0);
 
+    /* Default Caps+Shift hold works in either order and restores Caps state. */
+    keymap_set_enabled(0);
+    mock_caps_lock_on = 0;
+    active_timer_id = 0;
+    clear_shift_compensation();
+    modifier(VK_LSHIFT, 1);
+    assert(caps_event(1) == 1 && hold_active && !mock_caps_lock_on);
+    sent_count = 0;
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    assert(caps_event(0) == 1 && !hold_active);
+    modifier(VK_LSHIFT, 0);
+    if (active_timer_id == KEYMAP_COMPENSATION_TIMER_ID)
+        keymap_handle_timer(KEYMAP_COMPENSATION_TIMER_ID);
+    assert(!mock_caps_lock_on && !keymap_is_enabled());
+
+    mock_caps_lock_on = 0;
+    active_timer_id = 0;
+    clear_shift_compensation();
+    assert(caps_event(1) == 0 && mock_caps_lock_on);
+    modifier(VK_LSHIFT, 1);
+    assert(hold_active && caps_restore == CAPS_RESTORE_ON_RELEASE);
+    assert(caps_event(0) == 0 && !hold_active);
+    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
+    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    modifier(VK_LSHIFT, 0);
+    assert(!mock_caps_lock_on && !keymap_is_enabled());
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
                        (keymap_hotkey){KEYMAP_MOD_CTRL, 'K'});
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
@@ -278,76 +309,18 @@ int main(void)
     keymap_set_enabled(0);
 
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
-                       (keymap_hotkey){KEYMAP_MOD_CAPS, 0});
+                       (keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 0});
 
-    /* A Caps tap toggles Caps Lock immediately on key-down. */
+    /* A standalone Caps press keeps normal Windows behavior. */
+    keymap_set_enabled(0);
     mock_caps_lock_on = 0;
     assert(caps_event(1) == 0 && mock_caps_lock_on);
+    key_event('O', WM_KEYDOWN);
+    key_event('O', WM_KEYUP);
+    assert(!hold_active && !keymap_is_enabled());
     assert(caps_event(0) == 0 && mock_caps_lock_on);
     assert(caps_event(1) == 0 && !mock_caps_lock_on);
     assert(caps_event(0) == 0 && !mock_caps_lock_on);
-
-    /* A quick Caps tap keeps the visual state unchanged. */
-    keymap_set_enabled(0);
-    assert(caps_event(1) == 0);
-    assert(!keymap_is_enabled() && !keymap_is_visual_enabled());
-    assert(active_timer_id == KEYMAP_CAPS_PREVIEW_TIMER_ID);
-    assert(active_timer_delay == KEYMAP_CAPS_PREVIEW_DELAY_MS);
-    assert(caps_event(0) == 0);
-    assert(!keymap_is_visual_enabled());
-
-    /* A long Caps hold previews keypad mode, then restores the original Caps state. */
-    mock_caps_lock_on = 0;
-    assert(caps_event(1) == 0 && mock_caps_lock_on);
-    now_ms += KEYMAP_CAPS_PREVIEW_DELAY_MS;
-    keymap_handle_timer(KEYMAP_CAPS_PREVIEW_TIMER_ID);
-    assert(!keymap_is_enabled() && keymap_is_visual_enabled());
-    now_ms += KEYMAP_CAPS_LONG_HOLD_DELAY_MS - KEYMAP_CAPS_PREVIEW_DELAY_MS;
-    assert(caps_event(0) == 0);
-    assert(!keymap_is_enabled() && !keymap_is_visual_enabled());
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
-    assert(!mock_caps_lock_on);
-    /* Elapsed time still restores Caps if the preview timer dispatch was delayed. */
-    assert(caps_event(1) == 0 && mock_caps_lock_on);
-    now_ms += KEYMAP_CAPS_LONG_HOLD_DELAY_MS;
-    assert(caps_event(0) == 0);
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
-    assert(!mock_caps_lock_on);
-
-    /* Caps plus a character temporarily activates the keypad, then restores Caps. */
-    keymap_set_enabled(0);
-    mock_caps_lock_on = 0;
-    assert(caps_event(1) == 0 && !hold_active && mock_caps_lock_on);
-    sent_count = 0;
-    key_event('O', WM_KEYDOWN);
-    assert(hold_active && sent_count == 2 && sent_inputs[0].ki.wScan == L'9');
-    key_event('O', WM_KEYUP);
-    assert(hold_active);
-    assert(caps_event(0) == 0 && !hold_active);
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
-    assert(!mock_caps_lock_on);
-
-    /* Caps alone remains a hold shortcut if the toggle shortcut is customized. */
-    keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE});
-    assert(caps_event(1) == 0 && mock_caps_lock_on);
-    key_event('I', WM_KEYDOWN);
-    assert(hold_active && sent_inputs[sent_count - 2].ki.wScan == L'8');
-    key_event('I', WM_KEYUP);
-    assert(caps_event(0) == 0 && !hold_active && active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
-    assert(!mock_caps_lock_on);
-    keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
-                       (keymap_hotkey){KEYMAP_MOD_CAPS, 0});
-
-    /* An unrelated key does not start hold input; the Caps tap still toggles. */
-    assert(caps_event(1) == 0 && mock_caps_lock_on);
-    key_event(VK_F1, WM_KEYDOWN);
-    key_event(VK_F1, WM_KEYUP);
-    assert(caps_event(0) == 0 && mock_caps_lock_on);
-
     /* Caps+Shift sends a compensating Shift tap after release. */
     keymap_set_enabled(0);
     mock_caps_lock_on = 0;
@@ -406,11 +379,11 @@ int main(void)
     modifier(VK_LSHIFT, 0);
     assert(keymap_is_enabled() && !mock_caps_lock_on);
 
-    /* Capturing Caps alone is valid for hold input, but toggle needs a chord. */
+    /* A standalone Caps binding is rejected for hold input too. */
     keymap_begin_hold_capture();
     assert(caps_event(1) == 1);
     assert(caps_event(0) == 1);
-    assert(keymap_get_hold_hotkey().modifiers == KEYMAP_MOD_CAPS &&
+    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT) &&
            keymap_get_hold_hotkey().key == 0);
     keymap_begin_capture();
     assert(caps_event(1) == 1);
@@ -434,7 +407,7 @@ int main(void)
     modifier(VK_LSHIFT, 0);
     keymap_set_enabled(0);
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
-                       (keymap_hotkey){KEYMAP_MOD_CAPS, 0});
+                       (keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
     clear_shift_compensation();
     active_timer_id = 0;
 
@@ -812,6 +785,11 @@ int main(void)
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
     assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    keymap_set_block_letters(1);
+    assert(key_event(VK_OEM_1, WM_KEYDOWN) != 1);
+    assert(key_event(VK_OEM_1, WM_KEYUP) != 1);
+    keymap_set_block_letters(0);
+
     modifier(VK_LCONTROL, 0);
     assert(!keymap_is_enabled());
     assert(key_event('Q', WM_KEYUP) == 1);

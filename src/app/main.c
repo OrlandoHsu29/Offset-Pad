@@ -91,8 +91,7 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
     case WM_TIMER:
         if ((UINT_PTR)wparam == KEYMAP_HOLD_RESOLVE_TIMER_ID ||
             (UINT_PTR)wparam == KEYMAP_CAPS_RELEASE_TIMER_ID ||
-            (UINT_PTR)wparam == KEYMAP_COMPENSATION_TIMER_ID ||
-            (UINT_PTR)wparam == KEYMAP_CAPS_PREVIEW_TIMER_ID) {
+            (UINT_PTR)wparam == KEYMAP_COMPENSATION_TIMER_ID) {
             keymap_handle_timer((UINT_PTR)wparam);
             return 0;
         }
