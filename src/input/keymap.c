@@ -124,6 +124,9 @@ static unsigned int active_modifiers(void)
 static void sync_modifier_state_from_os(int current_modifier)
 {
     size_t index;
+    /* Injected releases during hold mode make async state differ from physical state. */
+    if (hold_modifiers_suspended)
+        return;
     /* Apps may consume physical modifier key-ups and replace them with injected events. */
     for (index = 0; index < SIDE_MODIFIER_COUNT; ++index) {
         if ((int)index == current_modifier)

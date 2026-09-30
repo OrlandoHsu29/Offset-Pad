@@ -46,6 +46,7 @@ static unsigned char mock_os_key_down[256];
 static DWORD mock_language_mode = 1U;
 static int mock_shift_toggles_ime;
 static int defer_compensation_timer_for_test;
+static int mock_track_injected_modifier_state;
 
 static void fire_mock_ime_timer(void)
 {
@@ -107,6 +108,16 @@ static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
     assert(sent_count + count <= sizeof(sent_inputs) / sizeof(sent_inputs[0]));
     for (index = 0; index < count; ++index) {
         sent_inputs[sent_count++] = input[index];
+        if (mock_track_injected_modifier_state) {
+            size_t modifier_index;
+            for (modifier_index = 0; modifier_index < SIDE_MODIFIER_COUNT; ++modifier_index) {
+                if (input[index].ki.wVk == modifier_keys[modifier_index]) {
+                    mock_os_key_down[modifier_keys[modifier_index]] =
+                        (input[index].ki.dwFlags & KEYEVENTF_KEYUP) == 0;
+                    break;
+                }
+            }
+        }
         if (input[index].ki.wVk == VK_CAPITAL &&
             !(input[index].ki.dwFlags & KEYEVENTF_KEYUP))
             mock_caps_lock_on = !mock_caps_lock_on;
@@ -274,6 +285,25 @@ int main(void)
         keymap_handle_timer(KEYMAP_COMPENSATION_TIMER_ID);
     assert(!mock_caps_lock_on && !keymap_is_enabled());
 
+    /* Injected Shift-up must not erase the physical Shift state used by Caps+Shift. */
+    mock_caps_lock_on = 0;
+    active_timer_id = 0;
+    clear_shift_compensation();
+    sent_count = 0;
+    mock_track_injected_modifier_state = 1;
+    mock_os_key_down[VK_LSHIFT] = 0;
+    modifier(VK_LSHIFT, 1);
+    assert(caps_event(1) == 1 && hold_active);
+    assert(mock_os_key_down[VK_LSHIFT] == 0);
+    key_event(VK_CAPITAL, WM_KEYDOWN); /* A repeated Caps event must not cancel the hold. */
+    assert(hold_active && keymap_is_visual_enabled());
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(hold_active && sent_inputs[sent_count - 2].ki.wScan == L'1');
+    caps_event(0);
+    assert(!hold_active);
+    modifier(VK_LSHIFT, 0);
+    mock_track_injected_modifier_state = 0;
     mock_caps_lock_on = 0;
     active_timer_id = 0;
     clear_shift_compensation();
