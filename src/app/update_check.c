@@ -103,16 +103,16 @@ static DWORD WINAPI update_check_thread(void *parameter)
     if (session == NULL)
         goto done;
     WinHttpSetTimeouts(session, (int)timeout, (int)timeout, (int)timeout, (int)timeout);
-    connection = WinHttpConnect(session, L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+    connection = WinHttpConnect(session, L"gitee.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (connection == NULL)
         goto done;
     request = WinHttpOpenRequest(connection, L"GET",
-        L"/repos/OrlandoHsu29/Offset-Pad/releases/latest", NULL,
+        L"/api/v5/repos/OrlandoHsu29/offset-pad/releases/latest", NULL,
         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (request == NULL)
         goto done;
     if (!WinHttpAddRequestHeaders(request,
-        L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n",
+        L"Accept: application/json\r\n",
         (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE) ||
         !WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||

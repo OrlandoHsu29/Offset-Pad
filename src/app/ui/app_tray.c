@@ -125,7 +125,7 @@ void app_tray_show_update_available(const wchar_t *version)
     data.dwInfoFlags = NIIF_INFO;
     lstrcpynW(data.szInfoTitle, L"Offset Pad 更新", ARRAYSIZE(data.szInfoTitle));
     swprintf(data.szInfo, ARRAYSIZE(data.szInfo),
-             L"发现新版本 %ls。点击此通知查看 GitHub Releases。", version);
+             L"发现新版本 %ls。点击此通知查看 Gitee Releases。", version);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
@@ -184,7 +184,7 @@ void app_tray_handle_message(LPARAM message)
     if (event == NIN_BALLOONUSERCLICK && update_notice_active) {
         update_notice_active = 0;
         ShellExecuteW(NULL, L"open",
-                      L"https://github.com/OrlandoHsu29/Offset-Pad/releases/latest",
+                      L"https://gitee.com/OrlandoHsu29/offset-pad/releases",
                       NULL, NULL, SW_SHOWNORMAL);
         return;
     }

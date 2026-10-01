@@ -47,7 +47,7 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/app -Isrc/input tests\app_
 | `src/app/ui/app_ui_paint.c` | 自绘控件与键位预览 |
 | `src/app/ui/app_tray.c` | 托盘图标、菜单和通知 |
 | `src/app/app_settings.c` | 用户设置和开机启动项 |
-| `src/app/update_check.c` | 启动时异步查询 GitHub Releases |
+| `src/app/update_check.c` | 启动时异步查询 Gitee Releases |
 | `src/app/ui/rounded_box.c` | 圆角控件绘制 |
 | `src/input/keymap.c` | 快捷键与数字小键盘映射 |
 | `resources/app-icon.rc` | 将窗口和托盘图标嵌入 exe |
@@ -55,7 +55,7 @@ gcc -std=c11 -DUNICODE -D_UNICODE -Wall -Wextra -Isrc/app -Isrc/input tests\app_
 
 ## 设置与资源
 
-快捷键、快捷键启用状态、自定义键位、“屏蔽未映射字符”和“自动检查更新”开关保存在 `HKCU\Software\Offset Pad`；自动检查更新默认开启，每次启动时通过 WinHTTP 请求 GitHub Releases 最新稳定版接口，只有发现更新才显示托盘通知，不会下载或安装；先前保存的 11 键位设置会保留前 10 个数字映射；开机时启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
+快捷键、快捷键启用状态、自定义键位、“屏蔽未映射字符”和“自动检查更新”开关保存在 `HKCU\Software\Offset Pad`；自动检查更新默认开启，每次启动时通过 WinHTTP 请求 Gitee Releases 最新稳定版接口，只有发现更新才显示托盘通知，不会下载或安装；先前保存的 11 键位设置会保留前 10 个数字映射；开机时启动项位于 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `Offset Pad`。卸载时会移除这些设置。
 
 “屏蔽未映射字符”新安装默认开启；启用后，小键盘模式仅允许映射键、顶部数字行和快捷键输入，其他未映射字符会被拦截；Backspace、方向键、回车和 Delete 等功能键照常工作；已保存的开关值不变。“按下切换模式”快捷键默认为 LCtrl + Caps Lock；“按住输入”快捷键默认为 Caps Lock + Shift；按住该组合并输入字符时临时启用小键盘，松开后恢复此前模式；单独短按 Caps Lock 仍正常切换大小写锁定。旧版默认的 Caps Lock 按住快捷键会自动迁移为 Caps Lock + Shift；用户自定义的其他快捷键保持不变。临时输入不会改写持久化的模式开关。程序每次启动均从普通键盘模式开始，模式状态只在本次运行中有效。快捷键必须由 2–4 个按键组成，不支持单键触发。录入任一快捷键时按 Delete 或 Backspace 可清除绑定；托盘菜单的“禁用快捷键”选项会同时停用两种快捷键，不影响界面按钮操作。
 
