@@ -17,6 +17,7 @@ void app_tray_shutdown(void);
 void app_tray_refresh(void);
 void app_tray_show_mode_reminder(void);
 void app_tray_show_update_available(const wchar_t *version);
+const wchar_t *app_tray_update_url(void);
 void app_tray_handle_message(LPARAM message);
 void app_tray_taskbar_created(void);
 

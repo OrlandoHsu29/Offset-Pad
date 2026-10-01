@@ -782,7 +782,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             return 0;
         case ID_UPDATE_LINK:
             ShellExecuteW(NULL, L"open",
-                          L"https://gitee.com/OrlandoHsu29/offset-pad/releases",
+                          app_tray_update_url(),
                           NULL, NULL, SW_SHOWNORMAL);
             return 0;
         case ID_AUTO_UPDATES:

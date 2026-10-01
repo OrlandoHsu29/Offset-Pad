@@ -21,6 +21,32 @@ static HICON active_icon;
 static app_tray_callbacks actions;
 static int tray_added;
 static int update_notice_active;
+static const wchar_t release_page_url[] =
+    L"https://gitee.com/OrlandoHsu29/offset-pad/releases";
+static wchar_t update_release_url[256] =
+    L"https://gitee.com/OrlandoHsu29/offset-pad/releases";
+
+static int valid_release_tag(const wchar_t *tag)
+{
+    size_t index = 0;
+    int dots = 0;
+    int has_digit = 0;
+    if (tag == NULL || tag[0] == L'\0')
+        return 0;
+    if (tag[0] == L'v' || tag[0] == L'V')
+        ++index;
+    for (; tag[index] != L'\0'; ++index) {
+        if (tag[index] >= L'0' && tag[index] <= L'9') {
+            has_digit = 1;
+        } else if (tag[index] == L'.' && has_digit && dots < 2) {
+            ++dots;
+            has_digit = 0;
+        } else {
+            return 0;
+        }
+    }
+    return dots == 2 && has_digit;
+}
 
 static HICON current_icon(void)
 {
@@ -115,8 +141,17 @@ void app_tray_show_mode_reminder(void)
 void app_tray_show_update_available(const wchar_t *version)
 {
     NOTIFYICONDATAW data = {0};
+    int url_length;
     if (version == NULL || !tray_added)
         return;
+    lstrcpynW(update_release_url, release_page_url, ARRAYSIZE(update_release_url));
+    if (valid_release_tag(version)) {
+        url_length = swprintf(update_release_url, ARRAYSIZE(update_release_url),
+                              L"https://gitee.com/OrlandoHsu29/offset-pad/releases/tag/%ls",
+                              version);
+        if (url_length < 0 || (size_t)url_length >= ARRAYSIZE(update_release_url))
+            lstrcpynW(update_release_url, release_page_url, ARRAYSIZE(update_release_url));
+    }
     update_notice_active = 1;
     data.cbSize = sizeof(data);
     data.hWnd = owner_window;
@@ -127,6 +162,11 @@ void app_tray_show_update_available(const wchar_t *version)
     swprintf(data.szInfo, ARRAYSIZE(data.szInfo),
              L"发现新版本 %ls。点击此通知查看 Gitee Releases。", version);
     Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+const wchar_t *app_tray_update_url(void)
+{
+    return update_release_url;
 }
 
 static void show_tray_menu(void)
@@ -184,7 +224,7 @@ void app_tray_handle_message(LPARAM message)
     if (event == NIN_BALLOONUSERCLICK && update_notice_active) {
         update_notice_active = 0;
         ShellExecuteW(NULL, L"open",
-                      L"https://gitee.com/OrlandoHsu29/offset-pad/releases",
+                      update_release_url,
                       NULL, NULL, SW_SHOWNORMAL);
         return;
     }
