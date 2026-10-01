@@ -17,10 +17,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Release
 安装 Inno Setup 7 后运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -Version 0.2.7
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -Version 0.2.8
 ```
 
-脚本会先进行 Release 构建并检查 exe 为 x64，然后输出 `dist\Offset-Pad-v0.2.7-windows-x64-setup.exe` 和 `.sha256` 校验文件。工具未被自动找到时，可用 `-Compiler` 和 `-InnoCompiler` 指定完整路径。发布新版本时，同步更新 `build-installer.ps1` 和 `installer/offset-pad.iss` 中的默认版本号。
+脚本会先进行 Release 构建并检查 exe 为 x64，然后输出 `dist\Offset-Pad-v0.2.8-windows-x64-setup.exe` 和 `.sha256` 校验文件。工具未被自动找到时，可用 `-Compiler` 和 `-InnoCompiler` 指定完整路径。发布新版本时，同步更新 `build-installer.ps1` 和 `installer/offset-pad.iss` 中的默认版本号。
 
 ## 测试
 
