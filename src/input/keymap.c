@@ -72,6 +72,7 @@ static int hold_active;
 static int hold_key_down;
 static int block_unmapped_keys;
 static unsigned char blocked_character_keys[32];
+static unsigned char passthrough_character_keys[32];
 static unsigned char modifiers[TRACKED_MODIFIER_COUNT];
 static unsigned char top_number_down[10];
 static unsigned char top_number_swallow_up[10];
@@ -552,15 +553,21 @@ static void sync_hold_input_layer(void)
     }
 }
 
-static void send_character(WORD character)
+static int send_character(WORD character)
 {
     INPUT input[2] = {0};
+    UINT inserted;
     input[0].type = INPUT_KEYBOARD;
     input[0].ki.wScan = character;
     input[0].ki.dwFlags = KEYEVENTF_UNICODE;
     input[1] = input[0];
     input[1].ki.dwFlags |= KEYEVENTF_KEYUP;
-    SendInput(2, input, sizeof(input[0]));
+    inserted = SendInput(2, input, sizeof(input[0]));
+    if (inserted == 1) {
+        input[0].ki.dwFlags |= KEYEVENTF_KEYUP;
+        SendInput(1, input, sizeof(input[0]));
+    }
+    return inserted != 0;
 }
 
 static void effective_mode_changed(int was_enabled)
@@ -1390,6 +1397,15 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
 
     if (event->vkCode < 256) {
         unsigned char key_mask = (unsigned char)(1U << (event->vkCode & 7U));
+        unsigned char *key_byte = &passthrough_character_keys[event->vkCode >> 3];
+        if (*key_byte & key_mask) {
+            if (released)
+                *key_byte &= (unsigned char)~key_mask;
+            return CallNextHookEx(hook, code, message, parameter);
+        }
+    }
+    if (event->vkCode < 256) {
+        unsigned char key_mask = (unsigned char)(1U << (event->vkCode & 7U));
         unsigned char *key_byte = &blocked_character_keys[event->vkCode >> 3];
         if (*key_byte & key_mask) {
             if (released)
@@ -1560,9 +1576,13 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 return 1;
             }
         } else if (keymap_is_enabled()) {
-            key->down = 1;
-            send_character(key->target);
-            return 1;
+            if (send_character(key->target)) {
+                key->down = 1;
+                return 1;
+            }
+            passthrough_character_keys[event->vkCode >> 3] |=
+                (unsigned char)(1U << (event->vkCode & 7U));
+            return CallNextHookEx(hook, code, message, parameter);
         }
         break;
     }
@@ -1579,9 +1599,13 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 return 1;
             }
         } else if (keymap_is_enabled()) {
-            top_number_down[number] = 1;
-            send_character((WORD)shifted_number_symbols[number]);
-            return 1;
+            if (send_character((WORD)shifted_number_symbols[number])) {
+                top_number_down[number] = 1;
+                return 1;
+            }
+            passthrough_character_keys[event->vkCode >> 3] |=
+                (unsigned char)(1U << (event->vkCode & 7U));
+            return CallNextHookEx(hook, code, message, parameter);
         }
     }
     if (hold_active && !is_character_key(event->vkCode)) {
@@ -1664,6 +1688,7 @@ void keymap_uninstall(void)
     ZeroMemory(hold_swallowed_keys, sizeof(hold_swallowed_keys));
     ZeroMemory(passed_keys, sizeof(passed_keys));
     ZeroMemory(blocked_character_keys, sizeof(blocked_character_keys));
+    ZeroMemory(passthrough_character_keys, sizeof(passthrough_character_keys));
     ZeroMemory(top_number_down, sizeof(top_number_down));
     ZeroMemory(top_number_swallow_up, sizeof(top_number_swallow_up));
     keymap_set_enabled(0);

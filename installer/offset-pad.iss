@@ -35,20 +35,31 @@ Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [CustomMessages]
 english.AutoStartTask=Start automatically when Windows starts
+english.CreateDesktopIcon=Create a desktop shortcut
+english.CreateStartMenuShortcuts=Create Start Menu shortcuts
+english.AdditionalIcons=Additional shortcuts:
+english.AdditionalTasks=Other tasks:
 english.LaunchProgram=Launch Offset Pad
 chinesesimp.AutoStartTask=开机时启动
+chinesesimp.CreateDesktopIcon=创建桌面快捷方式
+chinesesimp.CreateStartMenuShortcuts=创建开始菜单快捷方式
+chinesesimp.AdditionalIcons=其他快捷方式：
+chinesesimp.AdditionalTasks=其他任务：
 chinesesimp.LaunchProgram=运行 Offset Pad
 
 [Tasks]
-Name: "autostart"; Description: "{cm:AutoStartTask}"; Flags: checkedonce
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "startmenu"; Description: "{cm:CreateStartMenuShortcuts}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "autostart"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: unchecked
 
 [Files]
 Source: "..\build\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenu
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Tasks: startmenu
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Offset Pad"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue; Tasks: autostart
