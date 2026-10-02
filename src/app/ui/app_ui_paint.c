@@ -3,6 +3,7 @@
 #include <wchar.h>
 
 #include "app_ui_paint.h"
+#include "app_ui_layout.h"
 #include "app_settings.h"
 #include "rounded_box.h"
 #include "keymap.h"
@@ -84,12 +85,14 @@ static SIZE measure_label(HDC dc, const wchar_t *label, HFONT font)
     return extent;
 }
 
-static void draw_keycap(HDC dc, int left, int top, int width,
+static void draw_keycap(HDC dc, RECT logical,
                         const wchar_t *label, const wchar_t *shift_label,
                         int output, int selected, int hovered, int pressed)
 {
     int active = selected || pressed;
-    RECT rect = scaled_rect(left, top, left + width, top + 29);
+    int width = logical.right - logical.left;
+    RECT rect = scaled_rect(logical.left, logical.top,
+                            logical.right, logical.bottom);
     COLORREF fill = active ? COLOR_ACCENT :
                     (hovered ? COLOR_KEYCAP_HOVER :
                      (output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP));
@@ -259,7 +262,6 @@ static void paint_settings(HDC dc, const RECT *client)
         for (row = 0; row < 4; ++row) {
             int top = 221 + row * 34;
             if (row < 3) {
-                int source_left = 67 + (row == 1 ? 11 : 0);
                 for (column = 0; column < 3; ++column) {
                     size_t index = (size_t)(row * 3 + column);
                     wchar_t source_label[16];
@@ -275,13 +277,13 @@ static void paint_settings(HDC dc, const RECT *client)
                         lstrcpynW(source_label, base_label,
                                   (int)(sizeof(source_label) / sizeof(source_label[0])));
                     int pressed = (pressed_source_keys & (1U << index)) != 0;
-                    draw_keycap(dc, source_left + column * 34, top, 29,
+                    draw_keycap(dc, app_ui_keycap_rect(index, 0),
                                 selected ? L"?" :
                                 source == VK_CAPITAL ? L"CL" : source_label,
                                 selected ? NULL : shift_label,
                                 0, selected, hovered_source_key == (int)index,
                                 !visual_enabled && pressed);
-                    draw_keycap(dc, 260 + column * 34, top, 29,
+                    draw_keycap(dc, app_ui_keycap_rect(index, 1),
                                 target_keys[row][column], NULL, 1, 0, 0,
                                 visual_enabled && pressed);
                 }
@@ -296,7 +298,7 @@ static void paint_settings(HDC dc, const RECT *client)
                 keymap_format_source(source_label,
                                      sizeof(source_label) / sizeof(source_label[0]),
                                      keymap_get_source(9));
-                draw_keycap(dc, 78, top, 63,
+                draw_keycap(dc, app_ui_keycap_rect(9, 0),
                             selected_space ? L"\x6309\x952e" : source_label, NULL, 0,
                             selected_space, hovered_source_key == 9,
                             !visual_enabled && pressed_space);
@@ -310,15 +312,15 @@ static void paint_settings(HDC dc, const RECT *client)
                     if (base_label != NULL)
                         lstrcpynW(source_label, base_label,
                                   (int)(sizeof(source_label) / sizeof(source_label[0])));
-                draw_keycap(dc, 146, top, 29,
+                draw_keycap(dc, app_ui_keycap_rect(10, 0),
                                 selected_decimal ? L"?" : source_label,
                                 selected_decimal ? NULL : shift_label, 0,
                                 selected_decimal, hovered_source_key == 10,
                                 !visual_enabled && pressed_decimal);
                 }
-                draw_keycap(dc, 260, top, 63, L"0", NULL, 1, 0, 0,
+                draw_keycap(dc, app_ui_keycap_rect(9, 1), L"0", NULL, 1, 0, 0,
                             visual_enabled && pressed_space);
-                draw_keycap(dc, 328, top, 29, L".", NULL, 1, 0, 0,
+                draw_keycap(dc, app_ui_keycap_rect(10, 1), L".", NULL, 1, 0, 0,
                             visual_enabled && pressed_decimal);
             }
             rect = scaled_rect(200, top, 224, top + 29);
@@ -352,6 +354,16 @@ static void draw_setting_card(const DRAWITEMSTRUCT *item)
                    (int)(sizeof(label) / sizeof(label[0])));
     draw_label(item->hDC, label, rect, small_font, COLOR_INK,
                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+}
+
+static void draw_reset_icon(HDC dc, RECT circle, int reset_id)
+{
+    COLORREF fill = pressed_reset_id == reset_id ? COLOR_ACCENT_DOWN :
+                    (hovered_reset_id == reset_id ? COLOR_RESET_HOVER : COLOR_ACCENT);
+    rounded_box(dc, circle, fill, fill, 8);
+    OffsetRect(&circle, 0, -scale(1));
+    draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
+               COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
 static void draw_button_content(const DRAWITEMSTRUCT *item)
@@ -445,16 +457,9 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
                                  is_hold ? keymap_get_hold_hotkey() : keymap_get_hotkey());
         draw_shortcut_value(dc, shortcut, value_rect);
         {
-            int diameter = scale(16);
             RECT circle = {rect.right - scale(24), rect.top + scale(5),
                            rect.right - scale(8), rect.top + scale(21)};
-            COLORREF circle_fill = pressed_reset_id == reset_id ? COLOR_ACCENT_DOWN :
-                                   (hovered_reset_id == reset_id ?
-                                    COLOR_RESET_HOVER : COLOR_ACCENT);
-            rounded_box(dc, circle, circle_fill, circle_fill, diameter / 2);
-            OffsetRect(&circle, 0, -scale(1));
-            draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
-                       COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            draw_reset_icon(dc, circle, reset_id);
         }
         return;
     }
@@ -465,13 +470,7 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
                        rect.top + (rect.bottom - rect.top - diameter) / 2,
                        rect.left + (rect.right - rect.left + diameter) / 2,
                        rect.top + (rect.bottom - rect.top + diameter) / 2};
-        COLORREF circle_fill = pressed_reset_id == ID_RESET_KEYMAP ? COLOR_ACCENT_DOWN :
-                               (hovered_reset_id == ID_RESET_KEYMAP ?
-                                COLOR_RESET_HOVER : COLOR_ACCENT);
-        rounded_box(dc, circle, circle_fill, circle_fill, diameter / 2);
-        OffsetRect(&circle, 0, -scale(1));
-        draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
-                   COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+        draw_reset_icon(dc, circle, ID_RESET_KEYMAP);
         return;
     }
 
@@ -486,7 +485,7 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         circle.top += (rect.bottom - rect.top - diameter) / 2;
         circle.right = circle.left + diameter;
         circle.bottom = circle.top + diameter;
-        rounded_box(dc, circle, badge_fill, badge_fill, diameter / 2);
+        rounded_box(dc, circle, badge_fill, badge_fill, 10);
         pen = CreatePen(PS_SOLID, scale(1) > 0 ? scale(1) : 1, COLOR_WHITE);
         old_pen = pen != NULL ? SelectObject(dc, pen) : NULL;
         if (pen != NULL) {
@@ -519,7 +518,7 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         circle.top += (rect.bottom - rect.top - diameter) / 2;
         circle.right = circle.left + diameter;
         circle.bottom = circle.top + diameter;
-        rounded_box(dc, circle, circle_fill, circle_outline, diameter / 2);
+        rounded_box(dc, circle, circle_fill, circle_outline, 7);
         if (enabled) {
             POINT check[3];
             HPEN check_pen = CreatePen(PS_SOLID, scale(2), COLOR_WHITE);

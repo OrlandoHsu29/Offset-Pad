@@ -6,6 +6,7 @@
 
 #include "app_ui.h"
 #include "app_ui_paint.h"
+#include "app_ui_layout.h"
 #include "app_tray.h"
 #include "app_version.h"
 #include "app_settings.h"
@@ -81,21 +82,6 @@ static HICON current_logo(void)
 
 #define COLOR_WHITE RGB(255, 255, 255)
 #define COLOR_INK RGB(34, 34, 34)
-#define COLOR_MUTED RGB(112, 112, 112)
-#define COLOR_ACCENT RGB(43, 43, 43)
-#define COLOR_ACCENT_DOWN RGB(22, 22, 22)
-#define COLOR_TINT RGB(246, 246, 246)
-#define COLOR_HOVER RGB(243, 243, 243)
-#define COLOR_ACCENT_HOVER RGB(58, 58, 58)
-#define COLOR_RESET_HOVER RGB(96, 96, 96)
-#define COLOR_BORDER RGB(222, 222, 222)
-#define COLOR_MODE_BADGE_HOVER_BORDER RGB(190, 190, 190)
-#define COLOR_KEYCAP RGB(252, 252, 252)
-#define COLOR_KEYCAP_OUTPUT RGB(244, 244, 244)
-#define COLOR_KEYCAP_HOVER RGB(240, 240, 240)
-#define COLOR_SWITCH_HOVER RGB(205, 205, 205)
-#define COLOR_AUTOSTART_HOVER_ON RGB(70, 70, 70)
-#define COLOR_AUTOSTART_HOVER_OFF RGB(190, 190, 190)
 
 static app_ui_paint_state paint_state(void)
 {
@@ -148,17 +134,8 @@ static int header_update_button_left(void)
 
 static RECT source_key_rect(size_t index)
 {
-    int row;
-    int column;
-    int left;
-    if (index == 9)
-        return scaled_rect(78, 323, 141, 352);
-    if (index == 10)
-        return scaled_rect(146, 323, 175, 352);
-    row = (int)index / 3;
-    column = (int)index % 3;
-    left = 67 + (row == 1 ? 11 : 0) + column * 34;
-    return scaled_rect(left, 221 + row * 34, left + 29, 250 + row * 34);
+    RECT logical = app_ui_keycap_rect(index, 0);
+    return scaled_rect(logical.left, logical.top, logical.right, logical.bottom);
 }
 
 static int source_key_at(POINT point)
@@ -200,7 +177,9 @@ static LRESULT CALLBACK reset_hint_proc(HWND window, UINT message,
     if (message == WM_MOUSEACTIVATE)
         return MA_NOACTIVATE;
     return DefWindowProcW(window, message, wparam, lparam);
-}static void update_reset_tooltip(HWND tool, int id)
+}
+
+static void update_reset_tooltip(HWND tool, int id)
 {
     RECT client;
     RECT owner_rect;
@@ -366,9 +345,6 @@ static void invalidate_hover_button(int id)
         }
     }
 }
-
-
-static void update_reset_tooltip(HWND tool, int id);
 
 static LRESULT CALLBACK hover_button_proc(HWND window, UINT message,
                                           WPARAM wparam, LPARAM lparam)
