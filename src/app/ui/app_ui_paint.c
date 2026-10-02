@@ -34,6 +34,9 @@ static app_ui_paint_state current;
 #define control_font (current.control_font)
 #define small_font (current.small_font)
 #define compact_font (current.compact_font)
+#define symbol_font (current.symbol_font)
+#define large_symbol_font (current.large_symbol_font)
+#define keycap_font (current.keycap_font)
 #define icon_font (current.icon_font)
 #define hotkey_capture_status (current.capture_status)
 #define hovered_source_key (current.hovered_source_key)
@@ -70,21 +73,111 @@ static void draw_label(HDC dc, const wchar_t *label, RECT rect,
     DrawTextW(dc, label, -1, &rect, format | DT_NOPREFIX);
     SelectObject(dc, old_font);
 }
+
+static SIZE measure_label(HDC dc, const wchar_t *label, HFONT font)
+{
+    SIZE extent = {0};
+    HGDIOBJ old_font = SelectObject(dc, font != NULL ? font :
+                                    GetStockObject(DEFAULT_GUI_FONT));
+    GetTextExtentPoint32W(dc, label, (int)wcslen(label), &extent);
+    SelectObject(dc, old_font);
+    return extent;
+}
+
 static void draw_keycap(HDC dc, int left, int top, int width,
-                        const wchar_t *label, int output, int selected, int hovered,
-                        int pressed)
+                        const wchar_t *label, const wchar_t *shift_label,
+                        int output, int selected, int hovered, int pressed)
 {
     int active = selected || pressed;
-    RECT rect = scaled_rect(left, top, left + width, top + 24);
+    RECT rect = scaled_rect(left, top, left + width, top + 29);
     COLORREF fill = active ? COLOR_ACCENT :
                     (hovered ? COLOR_KEYCAP_HOVER :
                      (output ? COLOR_KEYCAP_OUTPUT : COLOR_KEYCAP));
+    HFONT label_font = body_font;
     rounded_box(dc, rect, fill,
                 active ? COLOR_ACCENT : COLOR_BORDER, 7);
-    draw_label(dc, label, rect,
-               width <= 40 && wcslen(label) > 2 ? small_font : body_font,
-               active ? COLOR_WHITE : COLOR_INK,
-               DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+    if (shift_label != NULL) {
+        RECT upper = rect;
+        RECT lower = rect;
+        HFONT symbol_label_font = symbol_font != NULL ? symbol_font : compact_font;
+        int narrow_symbols =
+            (wcscmp(shift_label, L"{") == 0 && wcscmp(label, L"[") == 0) ||
+            (wcscmp(shift_label, L"}") == 0 && wcscmp(label, L"]") == 0);
+        int quote_pair = wcscmp(shift_label, L"\"") == 0 &&
+                         wcscmp(label, L"'") == 0;
+        if (narrow_symbols)
+            symbol_label_font = compact_font;
+        else if (quote_pair)
+            symbol_label_font = large_symbol_font != NULL ? large_symbol_font : symbol_label_font;
+        upper.left += scale(8);
+        upper.right -= scale(8);
+        upper.top = rect.top + scale(quote_pair ? 2 : 0);
+        upper.bottom = rect.top + scale(quote_pair ? 18 : 16);
+        lower.left += scale(8);
+        lower.right -= scale(8);
+        lower.top = rect.top + scale(quote_pair ? 14 : 10);
+        lower.bottom = rect.top + scale(quote_pair ? 29 : 26);
+        draw_label(dc, shift_label, upper, symbol_label_font != NULL ? symbol_label_font : small_font,
+                   active ? COLOR_WHITE : COLOR_MUTED,
+                   DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+        draw_label(dc, label, lower, symbol_label_font != NULL ? symbol_label_font : small_font,
+                   active ? COLOR_WHITE : COLOR_INK,
+                   DT_SINGLELINE | DT_RIGHT | DT_VCENTER);
+    } else {
+        if (width <= 40 && wcslen(label) > 2) {
+            RECT inner = rect;
+            label_font = keycap_font != NULL ? keycap_font : compact_font;
+            inner.left += scale(3);
+            inner.right -= scale(3);
+            draw_label(dc, label, inner, label_font,
+                       active ? COLOR_WHITE : COLOR_INK,
+                       DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            return;
+        }
+        if (width > 40 && wcslen(label) > 1)
+            label_font = compact_font != NULL ? compact_font : small_font;
+        draw_label(dc, label, rect, label_font,
+                   active ? COLOR_WHITE : COLOR_INK,
+                   DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+    }
+}
+
+static const wchar_t *shifted_symbol_for_source(DWORD source)
+{
+    switch (source) {
+    case VK_OEM_1: return L":";
+    case VK_OEM_PLUS: return L"+";
+    case VK_OEM_COMMA: return L"<";
+    case VK_OEM_MINUS: return L"_";
+    case VK_OEM_PERIOD: return L">";
+    case VK_OEM_2: return L"?";
+    case VK_OEM_3: return L"~";
+    case VK_OEM_4: return L"{";
+    case VK_OEM_5: return L"|";
+    case VK_OEM_6: return L"}";
+    case VK_OEM_7: return L"\"";
+    case VK_OEM_102: return L">";
+    default: return NULL;
+    }
+}
+
+static const wchar_t *base_symbol_for_source(DWORD source)
+{
+    switch (source) {
+    case VK_OEM_1: return L";";
+    case VK_OEM_PLUS: return L"=";
+    case VK_OEM_COMMA: return L",";
+    case VK_OEM_MINUS: return L"-";
+    case VK_OEM_PERIOD: return L".";
+    case VK_OEM_2: return L"/";
+    case VK_OEM_3: return L"`";
+    case VK_OEM_4: return L"[";
+    case VK_OEM_5: return L"\\";
+    case VK_OEM_6: return L"]";
+    case VK_OEM_7: return L"'";
+    case VK_OEM_102: return L"<";
+    default: return NULL;
+    }
 }
 
 static int hotkey_is_set(keymap_hotkey hotkey)
@@ -152,7 +245,7 @@ static void paint_settings(HDC dc, const RECT *client)
                    ? L"按新按键 · Esc 取消" : L"点击左侧键帽图按键可修改映射",
                rect, small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
-    rect = scaled_rect(24, 211, 400, 341);
+    rect = scaled_rect(24, 211, 400, 363);
     rounded_box(dc, rect, COLOR_WHITE, COLOR_BORDER, 12);
     {
         static const wchar_t *target_keys[3][3] = {
@@ -164,25 +257,32 @@ static void paint_settings(HDC dc, const RECT *client)
         int column;
         int visual_enabled = keymap_is_visual_enabled();
         for (row = 0; row < 4; ++row) {
-            int top = 220 + row * 29;
+            int top = 221 + row * 34;
             if (row < 3) {
-                int source_left = 74 + (row == 1 ? 11 : 0);
+                int source_left = 67 + (row == 1 ? 11 : 0);
                 for (column = 0; column < 3; ++column) {
                     size_t index = (size_t)(row * 3 + column);
                     wchar_t source_label[16];
+                    DWORD source = keymap_get_source(index);
+                    const wchar_t *shift_label = shifted_symbol_for_source(source);
+                    const wchar_t *base_label = base_symbol_for_source(source);
                     int selected = keymap_is_source_capturing() &&
                                    keymap_capturing_source() == index;
                     keymap_format_source(source_label,
                                          sizeof(source_label) / sizeof(source_label[0]),
-                                         keymap_get_source(index));
+                                         source);
+                    if (base_label != NULL)
+                        lstrcpynW(source_label, base_label,
+                                  (int)(sizeof(source_label) / sizeof(source_label[0])));
                     int pressed = (pressed_source_keys & (1U << index)) != 0;
-                    draw_keycap(dc, source_left + column * 37, top, 29,
+                    draw_keycap(dc, source_left + column * 34, top, 29,
                                 selected ? L"?" :
-                                keymap_get_source(index) == VK_CAPITAL ? L"CL" : source_label,
+                                source == VK_CAPITAL ? L"CL" : source_label,
+                                selected ? NULL : shift_label,
                                 0, selected, hovered_source_key == (int)index,
                                 !visual_enabled && pressed);
-                    draw_keycap(dc, 275 + column * 37, top, 29,
-                                target_keys[row][column], 1, 0, 0,
+                    draw_keycap(dc, 260 + column * 34, top, 29,
+                                target_keys[row][column], NULL, 1, 0, 0,
                                 visual_enabled && pressed);
                 }
             } else {
@@ -196,31 +296,40 @@ static void paint_settings(HDC dc, const RECT *client)
                 keymap_format_source(source_label,
                                      sizeof(source_label) / sizeof(source_label[0]),
                                      keymap_get_source(9));
-                draw_keycap(dc, 74, top, 66,
-                            selected_space ? L"\x6309\x952e" : source_label, 0,
+                draw_keycap(dc, 78, top, 63,
+                            selected_space ? L"\x6309\x952e" : source_label, NULL, 0,
                             selected_space, hovered_source_key == 9,
                             !visual_enabled && pressed_space);
-                keymap_format_source(source_label,
-                                     sizeof(source_label) / sizeof(source_label[0]),
-                                     keymap_get_source(10));
-                draw_keycap(dc, 148, top, 29,
-                            selected_decimal ? L"?" : source_label, 0,
-                            selected_decimal, hovered_source_key == 10,
-                            !visual_enabled && pressed_decimal);
-                draw_keycap(dc, 275, top, 66, L"0", 1, 0, 0,
+                {
+                    DWORD source = keymap_get_source(10);
+                    const wchar_t *shift_label = shifted_symbol_for_source(source);
+                    const wchar_t *base_label = base_symbol_for_source(source);
+                    keymap_format_source(source_label,
+                                         sizeof(source_label) / sizeof(source_label[0]),
+                                         source);
+                    if (base_label != NULL)
+                        lstrcpynW(source_label, base_label,
+                                  (int)(sizeof(source_label) / sizeof(source_label[0])));
+                draw_keycap(dc, 146, top, 29,
+                                selected_decimal ? L"?" : source_label,
+                                selected_decimal ? NULL : shift_label, 0,
+                                selected_decimal, hovered_source_key == 10,
+                                !visual_enabled && pressed_decimal);
+                }
+                draw_keycap(dc, 260, top, 63, L"0", NULL, 1, 0, 0,
                             visual_enabled && pressed_space);
-                draw_keycap(dc, 349, top, 29, L".", 1, 0, 0,
+                draw_keycap(dc, 328, top, 29, L".", NULL, 1, 0, 0,
                             visual_enabled && pressed_decimal);
             }
-            rect = scaled_rect(215, top, 240, top + 24);
+            rect = scaled_rect(200, top, 224, top + 29);
             draw_label(dc, L"→", rect, body_font, COLOR_MUTED,
                        DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
     }
-    rect = scaled_rect(185, 469, 400, 488);
+    rect = scaled_rect(185, 491, 400, 510);
     draw_label(dc, L"关闭窗口后会继续在托盘运行", rect, small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_RIGHT | DT_VCENTER);
-    draw_label(dc, L"自动检查更新", scaled_rect(46, 469, 155, 488), small_font, COLOR_MUTED,
+    draw_label(dc, L"自动检查更新", scaled_rect(46, 491, 155, 510), small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_LEFT | DT_VCENTER);
 
 }
@@ -241,7 +350,7 @@ static void draw_setting_card(const DRAWITEMSTRUCT *item)
     rect.right -= scale(58);
     GetWindowTextW(item->hwndItem, label,
                    (int)(sizeof(label) / sizeof(label[0])));
-    draw_label(item->hDC, label, rect, control_font, COLOR_INK,
+    draw_label(item->hDC, label, rect, small_font, COLOR_INK,
                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
 }
 
@@ -262,6 +371,8 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
         wchar_t *tag = NULL;
         SIZE title_extent = {0};
         SIZE tag_extent = {0};
+        SIZE tag_text_extent = {0};
+        HFONT name_font = small_font != NULL ? small_font : control_font;
         RECT name_rect = rect;
         RECT value_rect = rect;
         int is_hold = item->CtlID == ID_HOLD_HOTKEY;
@@ -285,21 +396,35 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
             while (*tag == L' ')
                 ++tag;
         }
-        draw_label(dc, title, name_rect, control_font, COLOR_INK,
+        if (tag != NULL) {
+            int available = name_rect.right - name_rect.left;
+            title_extent = measure_label(dc, title, name_font);
+            tag_extent = measure_label(dc, L"· ", name_font);
+            tag_text_extent = measure_label(dc, tag, name_font);
+            if (title_extent.cx + tag_extent.cx + tag_text_extent.cx + scale(2) > available) {
+                name_font = small_font != NULL ? small_font : compact_font;
+                title_extent = measure_label(dc, title, name_font);
+                tag_extent = measure_label(dc, L"· ", name_font);
+                tag_text_extent = measure_label(dc, tag, name_font);
+            }
+            if (title_extent.cx + tag_extent.cx + tag_text_extent.cx + scale(2) > available &&
+                compact_font != NULL && name_font != compact_font) {
+                name_font = compact_font;
+                title_extent = measure_label(dc, title, name_font);
+                tag_extent = measure_label(dc, L"· ", name_font);
+            }
+        }
+        draw_label(dc, title, name_rect, name_font, COLOR_INK,
                    DT_SINGLELINE | DT_LEFT | DT_VCENTER);
         if (tag != NULL) {
-            HGDIOBJ old_font = SelectObject(dc, control_font);
-            GetTextExtentPoint32W(dc, title, (int)wcslen(title), &title_extent);
-            GetTextExtentPoint32W(dc, L"· ", 2, &tag_extent);
-            SelectObject(dc, old_font);
             name_rect.left += title_extent.cx;
             name_rect.right = name_rect.left + tag_extent.cx;
-            draw_label(dc, L"· ", name_rect, control_font, COLOR_MUTED,
+            draw_label(dc, L"· ", name_rect, name_font, COLOR_MUTED,
                        DT_SINGLELINE | DT_LEFT | DT_VCENTER);
             name_rect.left += tag_extent.cx;
             name_rect.right = rect.right - scale(34);
-            draw_label(dc, tag, name_rect, control_font, COLOR_MUTED,
-                       DT_SINGLELINE | DT_LEFT | DT_VCENTER);
+            draw_label(dc, tag, name_rect, name_font, COLOR_MUTED,
+                       DT_SINGLELINE | DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS);
         }
         value_rect.left += scale(12);
         value_rect.right -= scale(12);
@@ -331,6 +456,22 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
             draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
                        COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
+        return;
+    }
+
+    if (item->CtlID == ID_RESET_KEYMAP) {
+        int diameter = scale(16);
+        RECT circle = {rect.left + (rect.right - rect.left - diameter) / 2,
+                       rect.top + (rect.bottom - rect.top - diameter) / 2,
+                       rect.left + (rect.right - rect.left + diameter) / 2,
+                       rect.top + (rect.bottom - rect.top + diameter) / 2};
+        COLORREF circle_fill = pressed_reset_id == ID_RESET_KEYMAP ? COLOR_ACCENT_DOWN :
+                               (hovered_reset_id == ID_RESET_KEYMAP ?
+                                COLOR_RESET_HOVER : COLOR_ACCENT);
+        rounded_box(dc, circle, circle_fill, circle_fill, diameter / 2);
+        OffsetRect(&circle, 0, -scale(1));
+        draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
+                   COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         return;
     }
 
@@ -558,6 +699,12 @@ void app_ui_paint_hint(HDC dc, RECT rect, app_ui_paint_state state)
         text_rect = rect;
         text_rect.bottom -= tail_height;
         InflateRect(&text_rect, -scale(9), -scale(2));
+        if (active_hint_id == ID_RESET_KEYMAP) {
+            draw_label(dc, L"\x91CD\x7F6E\x6309\x952E\x6620\x5C04", text_rect,
+                       compact_font, COLOR_INK,
+                       DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            return;
+        }
         draw_label(dc, L"重置快捷键", text_rect, compact_font, COLOR_INK,
                    DT_SINGLELINE | DT_CENTER | DT_VCENTER);
     }

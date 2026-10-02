@@ -709,6 +709,14 @@ int keymap_source_supported(DWORD source)
         (source >= '0' && source <= '9'))
         return 1;
     switch (source) {
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_LMENU:
+    case VK_RMENU:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_LWIN:
+    case VK_RWIN:
     case VK_SPACE:
     case VK_CAPITAL:
     case VK_OEM_COMMA:
@@ -744,6 +752,14 @@ void keymap_format_source(wchar_t *buffer, size_t capacity, DWORD source)
         return;
     }
     switch (source) {
+    case VK_LCONTROL: label = L"LCtrl"; break;
+    case VK_RCONTROL: label = L"RCtrl"; break;
+    case VK_LMENU: label = L"LAlt"; break;
+    case VK_RMENU: label = L"RAlt"; break;
+    case VK_LSHIFT: label = L"LShift"; break;
+    case VK_RSHIFT: label = L"RShift"; break;
+    case VK_LWIN: label = L"LWin"; break;
+    case VK_RWIN: label = L"RWin"; break;
     case VK_SPACE: label = L"空格"; break;
     case VK_CAPITAL: label = L"Caps"; break;
     case VK_OEM_COMMA: label = L","; break;
@@ -774,6 +790,16 @@ void keymap_get_sources(DWORD sources[KEYMAP_KEY_COUNT])
         return;
     for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
         sources[index] = keys[index].source;
+}
+
+void keymap_get_default_sources(DWORD sources[KEYMAP_KEY_COUNT])
+{
+    static const DWORD defaults[KEYMAP_KEY_COUNT] = {
+        'U', 'I', 'O', 'J', 'K', 'L', 'N', 'M',
+        VK_OEM_COMMA, VK_SPACE, VK_OEM_PERIOD
+    };
+    if (sources != NULL)
+        CopyMemory(sources, defaults, sizeof(defaults));
 }
 
 int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
@@ -964,19 +990,19 @@ void keymap_format_hotkey(wchar_t *buffer, size_t capacity, keymap_hotkey value)
     if (buffer == NULL || capacity == 0)
         return;
     buffer[0] = L'\0';
-    if (value.modifiers & KEYMAP_MOD_CAPS) append_hotkey_part(buffer, capacity, L"Caps");
     if (value.modifiers & KEYMAP_MOD_CTRL) append_hotkey_part(buffer, capacity, L"Ctrl");
     if (value.modifiers & KEYMAP_MOD_LCTRL) append_hotkey_part(buffer, capacity, L"LCtrl");
     if (value.modifiers & KEYMAP_MOD_RCTRL) append_hotkey_part(buffer, capacity, L"RCtrl");
     if (value.modifiers & KEYMAP_MOD_ALT) append_hotkey_part(buffer, capacity, L"Alt");
     if (value.modifiers & KEYMAP_MOD_LALT) append_hotkey_part(buffer, capacity, L"LAlt");
     if (value.modifiers & KEYMAP_MOD_RALT) append_hotkey_part(buffer, capacity, L"RAlt");
-    if (value.modifiers & KEYMAP_MOD_SHIFT) append_hotkey_part(buffer, capacity, L"Shift");
-    if (value.modifiers & KEYMAP_MOD_LSHIFT) append_hotkey_part(buffer, capacity, L"LShift");
-    if (value.modifiers & KEYMAP_MOD_RSHIFT) append_hotkey_part(buffer, capacity, L"RShift");
     if (value.modifiers & KEYMAP_MOD_WIN) append_hotkey_part(buffer, capacity, L"Win");
     if (value.modifiers & KEYMAP_MOD_LWIN) append_hotkey_part(buffer, capacity, L"LWin");
     if (value.modifiers & KEYMAP_MOD_RWIN) append_hotkey_part(buffer, capacity, L"RWin");
+    if (value.modifiers & KEYMAP_MOD_SHIFT) append_hotkey_part(buffer, capacity, L"Shift");
+    if (value.modifiers & KEYMAP_MOD_LSHIFT) append_hotkey_part(buffer, capacity, L"LShift");
+    if (value.modifiers & KEYMAP_MOD_RSHIFT) append_hotkey_part(buffer, capacity, L"RShift");
+    if (value.modifiers & KEYMAP_MOD_CAPS) append_hotkey_part(buffer, capacity, L"Caps");
     if (value.key == 0)
         return;
     if ((value.key >= 'A' && value.key <= 'Z') ||
@@ -1209,6 +1235,12 @@ static int modifier_index(const KBDLLHOOKSTRUCT *event)
     }
 }
 
+static int shortcut_passthrough_modifier_active(void)
+{
+    return (active_modifiers() &
+            (KEYMAP_MOD_CTRL_SIDES | KEYMAP_MOD_ALT_SIDES | KEYMAP_MOD_WIN_SIDES)) != 0;
+}
+
 static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter)
 {
     const KBDLLHOOKSTRUCT *event;
@@ -1234,6 +1266,69 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
 
     released = message == WM_KEYUP || message == WM_SYSKEYUP;
     modifier = modifier_index(event);
+    if (modifier >= 0 && keymap_is_enabled() && capture == CAPTURE_NONE) {
+        for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
+            mapped_key *key = &keys[index];
+            if (key->source != event->vkCode)
+                continue;
+            if (modifier < SIDE_MODIFIER_COUNT)
+                sync_modifier_state_from_os(modifier);
+            if (modifiers[modifier] && !hold_modifiers_suspended) {
+                INPUT release = {0};
+                release.type = INPUT_KEYBOARD;
+                release.ki.wVk = (WORD)event->vkCode;
+                release.ki.dwFlags = KEYEVENTF_KEYUP;
+                if (modifier == 1 || modifier == 3 ||
+                    modifier == 6 || modifier == 7)
+                    release.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+                SendInput(1, &release, sizeof(release));
+            }
+            modifiers[modifier] = 0;
+            mask = active_modifiers();
+            if (hold_provisional &&
+                !modifiers_contain(mask, hold_hotkey.modifiers)) {
+                clear_hold_provisional();
+                set_hold_active(0);
+            } else if (hold_active &&
+                       !modifiers_equal(mask, hold_hotkey.modifiers)) {
+                set_hold_active(0);
+            }
+            if (hotkey.key == 0 && hotkey.modifiers != 0 &&
+                !modifiers_contain(mask, hotkey.modifiers))
+                chord_down = 0;
+            if (key->swallow_up && key->swallow_source == event->vkCode) {
+                if (released) {
+                    key->swallow_up = 0;
+                    key->swallow_source = 0;
+                }
+                return 1;
+            }
+            if (released) {
+                if (key->down)
+                    key->down = 0;
+                return 1;
+            }
+            if (send_character(key->target)) {
+                key->down = 1;
+                return 1;
+            }
+            modifiers[modifier] = 1;
+            break;
+        }
+    }
+    if (modifier >= 0) {
+        for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
+            mapped_key *key = &keys[index];
+            if (!key->swallow_up || key->swallow_source != event->vkCode)
+                continue;
+            if (released) {
+                key->swallow_up = 0;
+                key->swallow_source = 0;
+                modifiers[modifier] = 0;
+            }
+            return 1;
+        }
+    }
     if (modifier == CAPS_MODIFIER_INDEX && !released &&
         caps_restore == CAPS_RESTORE_TIMER)
         complete_caps_restore();
@@ -1281,6 +1376,11 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         if (keymap_is_source_capturing()) {
             if (!released) {
                 captured_modifiers[modifier] = 1;
+                modifiers[modifier] = 0;
+                if (active_modifiers() == 0)
+                    finish_source_capture(event->vkCode);
+                else
+                    modifiers[modifier] = 1;
                 return 1;
             }
             if (captured_modifiers[modifier]) {
@@ -1555,6 +1655,16 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             keymap_set_enabled(!enabled);
             PostMessageW(notify_window, changed_message, 0, 0);
             return 1;
+        }
+    }
+
+    /* Preserve mapped physical keys when they are part of an app/system shortcut. */
+    if (enabled && !hold_active && shortcut_passthrough_modifier_active()) {
+        for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
+            if (keys[index].source != event->vkCode)
+                continue;
+            track_passed_key(event->vkCode, released);
+            return CallNextHookEx(hook, code, message, parameter);
         }
     }
 

@@ -242,7 +242,11 @@ int main(void)
            KEYMAP_CAPTURE_SAVED);
     keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]),
                          (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
-    assert(wcscmp(name, L"Caps + Shift") == 0);
+    assert(wcscmp(name, L"Shift + Caps") == 0);
+    keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]),
+                         (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT |
+                                             KEYMAP_MOD_LCTRL, 'K'});
+    assert(wcscmp(name, L"LCtrl + LShift + Caps + K") == 0);
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN, 'K'}));
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL) &&
            keymap_get_hotkey().key == 0);
@@ -688,7 +692,11 @@ int main(void)
     modifier(VK_LCONTROL, 1);
     assert(key_event('C', WM_KEYDOWN) != 1);
     assert(key_event('C', WM_KEYUP) != 1);
+    sent_count = 0;
+    assert(key_event('N', WM_KEYDOWN) != 1);
     modifier(VK_LCONTROL, 0);
+    assert(key_event('N', WM_KEYUP) != 1);
+    assert(keymap_is_enabled() && sent_count == 0);
     modifier(VK_LSHIFT, 1);
     assert(key_event('A', WM_KEYDOWN) == 1);
     assert(key_event('A', WM_KEYUP) == 1);
@@ -1050,6 +1058,45 @@ int main(void)
     assert(preview_indices[2] == 2 && preview_states[2] == 1);
     assert(preview_indices[3] == 2 && preview_states[3] == 0);
     keymap_set_preview_enabled(0);
+
+    {
+        keymap_hotkey saved_hotkey = keymap_get_hotkey();
+        keymap_set_enabled(0);
+        keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_RCTRL, 'U'});
+        keymap_begin_source_capture(10);
+        modifier(VK_RCONTROL, 1);
+        assert(!keymap_is_source_capturing() &&
+               keymap_get_source(10) == VK_RCONTROL);
+        modifier(VK_RCONTROL, 0);
+        keymap_format_source(name, sizeof(name) / sizeof(name[0]), VK_RCONTROL);
+        assert(wcscmp(name, L"RCtrl") == 0);
+
+        sent_count = 0;
+        modifier(VK_RCONTROL, 1);
+        modifier(VK_RCONTROL, 0);
+        assert(sent_count == 0);
+
+        keymap_set_enabled(1);
+        sent_count = 0;
+        modifier(VK_RCONTROL, 1);
+        assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'.' &&
+               (active_modifiers() & KEYMAP_MOD_RCTRL) == 0);
+        assert(key_event('U', WM_KEYDOWN) == 1);
+        assert(key_event('U', WM_KEYUP) == 1);
+        modifier(VK_RCONTROL, 0);
+        assert(keymap_is_enabled() && sent_inputs[2].ki.wScan == L'7');
+
+        sent_count = 0;
+        modifier(VK_LCONTROL, 1);
+        assert(key_event('U', WM_KEYDOWN) != 1);
+        assert(key_event('U', WM_KEYUP) != 1);
+        modifier(VK_LCONTROL, 0);
+        assert(keymap_is_enabled() && sent_count == 0);
+
+        keymap_set_enabled(0);
+        keymap_set_hotkey(saved_hotkey);
+        assert(keymap_set_sources(defaults));
+    }
 
     puts("keymap tests passed");
     return 0;

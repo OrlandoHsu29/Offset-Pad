@@ -66,6 +66,7 @@ void keymap_set_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hotkey(void);
 int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT]);
 void keymap_get_sources(DWORD sources[KEYMAP_KEY_COUNT]);
+void keymap_get_default_sources(DWORD sources[KEYMAP_KEY_COUNT]);
 DWORD keymap_get_source(size_t index);
 int keymap_source_supported(DWORD source);
 void keymap_format_source(wchar_t *buffer, size_t capacity, DWORD source);

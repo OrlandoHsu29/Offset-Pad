@@ -38,6 +38,9 @@ static HFONT body_font;
 static HFONT control_font;
 static HFONT small_font;
 static HFONT compact_font;
+static HFONT symbol_font;
+static HFONT large_symbol_font;
+static HFONT keycap_font;
 static HFONT icon_font;
 static HICON light_icon;
 static HICON dark_icon;
@@ -63,7 +66,7 @@ typedef struct hover_button {
     int tracking_mouse_leave;
 } hover_button;
 
-static hover_button hover_buttons[8];
+static hover_button hover_buttons[10];
 
 static HICON current_icon(void)
 {
@@ -105,6 +108,9 @@ static app_ui_paint_state paint_state(void)
     state.control_font = control_font;
     state.small_font = small_font;
     state.compact_font = compact_font;
+    state.symbol_font = symbol_font;
+    state.large_symbol_font = large_symbol_font;
+    state.keycap_font = keycap_font;
     state.icon_font = icon_font;
     state.capture_status = hotkey_capture_status;
     state.hovered_source_key = hovered_source_key;
@@ -146,13 +152,13 @@ static RECT source_key_rect(size_t index)
     int column;
     int left;
     if (index == 9)
-        return scaled_rect(74, 307, 140, 331);
+        return scaled_rect(78, 323, 141, 352);
     if (index == 10)
-        return scaled_rect(148, 307, 177, 331);
+        return scaled_rect(146, 323, 175, 352);
     row = (int)index / 3;
     column = (int)index % 3;
-    left = 74 + (row == 1 ? 11 : 0) + column * 37;
-    return scaled_rect(left, 220 + row * 29, left + 29, 244 + row * 29);
+    left = 67 + (row == 1 ? 11 : 0) + column * 34;
+    return scaled_rect(left, 221 + row * 34, left + 29, 250 + row * 34);
 }
 
 static int source_key_at(POINT point)
@@ -219,7 +225,10 @@ static LRESULT CALLBACK reset_hint_proc(HWND window, UINT message,
     if (!GetClientRect(tool, &client))
         return;
 
-    if (id == ID_BLOCK_LETTERS_TITLE) {
+    if (id == ID_RESET_KEYMAP) {
+        lstrcpynW(label, L"\x91CD\x7F6E\x6309\x952E\x6620\x5C04",
+                  (int)(sizeof(label) / sizeof(label[0])));
+    } else if (id == ID_BLOCK_LETTERS_TITLE) {
         lstrcpynW(label, L"小键盘模式下拦截未映射字符键；\n顶部数字行仍输出对应符号。",
                   (int)(sizeof(label) / sizeof(label[0])));
     } else {
@@ -293,6 +302,11 @@ static int shortcut_reset_at(HWND window, POINT point)
     RECT client;
     RECT hit;
     int control_id = GetDlgCtrlID(window);
+    if (control_id == ID_RESET_KEYMAP) {
+        if (!GetClientRect(window, &client))
+            return 0;
+        return PtInRect(&client, point) ? ID_RESET_KEYMAP : 0;
+    }
     if (control_id != ID_HOTKEY && control_id != ID_HOLD_HOTKEY)
         return 0;
     if (!GetClientRect(window, &client))
@@ -570,37 +584,41 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_CREATE:
         hotkey_button = CreateWindowExW(0, L"BUTTON", L"按下切换模式 · 快捷键",
                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                         scale(24), scale(353), scale(188), scale(46),
+                                         scale(24), scale(375), scale(188), scale(46),
                                          window, (HMENU)(INT_PTR)ID_HOTKEY, instance, NULL);
         hold_hotkey_button = CreateWindowExW(0, L"BUTTON", L"按住输入 · 快捷键",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                                              scale(224), scale(353), scale(176), scale(46),
+                                              scale(224), scale(375), scale(176), scale(46),
                                               window, (HMENU)(INT_PTR)ID_HOLD_HOTKEY, instance, NULL);
         CreateWindowExW(0, L"STATIC", L"屏蔽未映射字符",
                                               WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
-                                              scale(24), scale(409), scale(196), scale(46),
+                                              scale(24), scale(431), scale(196), scale(46),
                                               window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS_CARD, instance, NULL);
         CreateWindowExW(WS_EX_TRANSPARENT, L"STATIC", L"",
                         WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY,
-                        scale(38), scale(422), scale(128), scale(20),
+                        scale(38), scale(444), scale(128), scale(20),
                         window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS_TITLE, instance, NULL);
         CreateWindowExW(0, L"STATIC", L"开机时启动",
                                            WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
-                                           scale(232), scale(409), scale(168), scale(46),
+                                           scale(232), scale(431), scale(168), scale(46),
                                            window, (HMENU)(INT_PTR)ID_AUTOSTART_CARD, instance, NULL);
 
         block_letters_check = CreateWindowExW(0, L"BUTTON", L"",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(166), scale(420), scale(42), scale(24),
+                        scale(166), scale(442), scale(42), scale(24),
                         window, (HMENU)(INT_PTR)ID_BLOCK_LETTERS, instance, NULL);
         autostart_check = CreateWindowExW(0, L"BUTTON", L"",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(346), scale(420), scale(42), scale(24),
+                        scale(346), scale(442), scale(42), scale(24),
                         window, (HMENU)(INT_PTR)ID_AUTOSTART, instance, NULL);
         auto_updates_check = CreateWindowExW(0, L"BUTTON", L"",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(24), scale(470), scale(16), scale(16),
+                        scale(24), scale(492), scale(16), scale(16),
                         window, (HMENU)(INT_PTR)ID_AUTO_UPDATES, instance, NULL);
+        CreateWindowExW(0, L"BUTTON", L"",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                        scale(372), scale(212), scale(24), scale(24),
+                        window, (HMENU)(INT_PTR)ID_RESET_KEYMAP, instance, NULL);
         update_link_button = CreateWindowExW(0, L"BUTTON", L"有可用更新，点击查看",
                         WS_CHILD | WS_TABSTOP | BS_OWNERDRAW |
                         (update_available ? WS_VISIBLE : 0),
@@ -618,6 +636,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         attach_hover_tracking(GetDlgItem(window, ID_AUTO_UPDATES), ID_AUTO_UPDATES);
         attach_hover_tracking(GetDlgItem(window, ID_UPDATE_LINK), ID_UPDATE_LINK);
         attach_hover_tracking(GetDlgItem(window, ID_MODE_BADGE), ID_MODE_BADGE);
+        attach_hover_tracking(GetDlgItem(window, ID_RESET_KEYMAP), ID_RESET_KEYMAP);
         shortcut_tooltip = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 RESET_HINT_CLASS, L"", WS_POPUP,
@@ -636,7 +655,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 id == ID_HOTKEY || id == ID_HOLD_HOTKEY ||
                 id == ID_AUTOSTART || id == ID_BLOCK_LETTERS ||
                 id == ID_AUTO_UPDATES || id == ID_UPDATE_LINK ||
-                id == ID_MODE_BADGE)
+                id == ID_MODE_BADGE || id == ID_RESET_KEYMAP)
                 SetCursor(LoadCursorW(NULL, IDC_HAND));
             else
                 SetCursor(LoadCursorW(NULL, IDC_ARROW));
@@ -756,6 +775,19 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                     show_error(L"无法保存快捷键设置。");
                 else
                     keymap_set_hold_hotkey(value);
+                ui_refresh();
+                return 0;
+            }
+        case ID_RESET_KEYMAP:
+            {
+                DWORD sources[KEYMAP_KEY_COUNT];
+                keymap_cancel_capture();
+                hotkey_capture_status[0] = L'\0';
+                keymap_get_default_sources(sources);
+                if (!settings_save_sources(sources))
+                    show_error(L"\x65E0\x6CD5\x4FDD\x5B58\x6309\x952E\x6620\x5C04\x8BBE\x7F6E\x3002");
+                else
+                    keymap_set_sources(sources);
                 ui_refresh();
                 return 0;
             }
@@ -881,6 +913,9 @@ void ui_shutdown(void)
     if (control_font != NULL) DeleteObject(control_font);
     if (small_font != NULL) DeleteObject(small_font);
     if (compact_font != NULL) DeleteObject(compact_font);
+    if (symbol_font != NULL) DeleteObject(symbol_font);
+    if (large_symbol_font != NULL) DeleteObject(large_symbol_font);
+    if (keycap_font != NULL) DeleteObject(keycap_font);
     if (icon_font != NULL) DeleteObject(icon_font);
     title_font = NULL;
     heading_font = NULL;
@@ -888,6 +923,9 @@ void ui_shutdown(void)
     control_font = NULL;
     small_font = NULL;
     compact_font = NULL;
+    symbol_font = NULL;
+    large_symbol_font = NULL;
+    keycap_font = NULL;
     icon_font = NULL;
     rounded_box_shutdown();
 }
@@ -938,12 +976,24 @@ void ui_show(void)
             compact_font = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        if (symbol_font == NULL)
+            symbol_font = CreateFontW(-scale(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        if (large_symbol_font == NULL)
+            large_symbol_font = CreateFontW(-scale(15), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        if (keycap_font == NULL)
+            keycap_font = CreateFontW(-scale(9), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         if (icon_font == NULL)
             icon_font = CreateFontW(-scale(12), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
                                     L"Segoe UI Symbol");
-        rect = scaled_rect(0, 0, 424, 500);
+        rect = scaled_rect(0, 0, 424, 522);
         AdjustWindowRect(&rect, style, FALSE);
         width = rect.right - rect.left;
         height = rect.bottom - rect.top;

@@ -129,7 +129,7 @@ static LRESULT CALLBACK main_proc(HWND window, UINT message, WPARAM wparam, LPAR
         return 0;
     case WM_OFFSET_PAD_SOURCE_CAPTURE_DONE:
         if (wparam == KEYMAP_CAPTURE_INVALID) {
-            MessageBoxW(window, L"请按单个字母、数字、常用符号或空格，且不要占用单键快捷键；Esc 可取消。",
+            MessageBoxW(window, L"请按单个字母、数字、常用符号、空格或左右修饰键；Esc 可取消。",
                         L"Offset Pad", MB_OK | MB_ICONINFORMATION);
         } else if (wparam == KEYMAP_CAPTURE_SAVED) {
             DWORD sources[KEYMAP_KEY_COUNT];

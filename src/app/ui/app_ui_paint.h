@@ -13,6 +13,9 @@ typedef struct app_ui_paint_state {
     HFONT control_font;
     HFONT small_font;
     HFONT compact_font;
+    HFONT symbol_font;
+    HFONT large_symbol_font;
+    HFONT keycap_font;
     HFONT icon_font;
     const wchar_t *capture_status;
     int hovered_source_key;
@@ -36,6 +39,7 @@ typedef struct app_ui_paint_state {
 #define ID_MODE_BADGE 111
 #define ID_RESET_HOTKEY 112
 #define ID_RESET_HOLD_HOTKEY 113
+#define ID_RESET_KEYMAP 115
 
 void app_ui_paint_settings(HDC dc, const RECT *client, app_ui_paint_state state);
 void app_ui_paint_hint(HDC dc, RECT rect, app_ui_paint_state state);
