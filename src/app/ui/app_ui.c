@@ -593,7 +593,7 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                         window, (HMENU)(INT_PTR)ID_AUTO_UPDATES, instance, NULL);
         CreateWindowExW(0, L"BUTTON", L"",
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(372), scale(212), scale(24), scale(24),
+                        scale(364), scale(212), scale(24), scale(24),
                         window, (HMENU)(INT_PTR)ID_RESET_KEYMAP, instance, NULL);
         update_link_button = CreateWindowExW(0, L"BUTTON", L"有可用更新，点击查看",
                         WS_CHILD | WS_TABSTOP | BS_OWNERDRAW |
@@ -933,9 +933,9 @@ void ui_show(void)
                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         if (heading_font == NULL)
-            heading_font = CreateFontW(-scale(17), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            heading_font = CreateFontW(-scale(17), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                       CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+                                       CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei");
         if (body_font == NULL)
             body_font = CreateFontW(-scale(15), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
