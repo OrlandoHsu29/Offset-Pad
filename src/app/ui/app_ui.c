@@ -138,6 +138,17 @@ static RECT source_key_rect(size_t index)
     return scaled_rect(logical.left, logical.top, logical.right, logical.bottom);
 }
 
+static RECT reset_keymap_rect(void)
+{
+    return scaled_rect(372, 212, 396, 236);
+}
+
+static int reset_keymap_at(POINT point)
+{
+    RECT rect = reset_keymap_rect();
+    return PtInRect(&rect, point) ? ID_RESET_KEYMAP : 0;
+}
+
 static int source_key_at(POINT point)
 {
     size_t index;
@@ -260,6 +271,10 @@ static void update_reset_tooltip(HWND tool, int id)
     } else {
         anchor.x = client.right - scale(16);
         anchor.y = scale(13);
+        if (id == ID_RESET_KEYMAP) {
+            anchor.x = scale(384);
+            anchor.y = scale(224);
+        }
         ClientToScreen(tool, &anchor);
         x = anchor.x - width / 2;
         y = anchor.y - height - scale(8);
@@ -281,11 +296,6 @@ static int shortcut_reset_at(HWND window, POINT point)
     RECT client;
     RECT hit;
     int control_id = GetDlgCtrlID(window);
-    if (control_id == ID_RESET_KEYMAP) {
-        if (!GetClientRect(window, &client))
-            return 0;
-        return PtInRect(&client, point) ? ID_RESET_KEYMAP : 0;
-    }
     if (control_id != ID_HOTKEY && control_id != ID_HOLD_HOTKEY)
         return 0;
     if (!GetClientRect(window, &client))
@@ -591,10 +601,6 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                         scale(24), scale(492), scale(16), scale(16),
                         window, (HMENU)(INT_PTR)ID_AUTO_UPDATES, instance, NULL);
-        CreateWindowExW(0, L"BUTTON", L"",
-                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                        scale(364), scale(212), scale(24), scale(24),
-                        window, (HMENU)(INT_PTR)ID_RESET_KEYMAP, instance, NULL);
         update_link_button = CreateWindowExW(0, L"BUTTON", L"有可用更新，点击查看",
                         WS_CHILD | WS_TABSTOP | BS_OWNERDRAW |
                         (update_available ? WS_VISIBLE : 0),
@@ -612,7 +618,6 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
         attach_hover_tracking(GetDlgItem(window, ID_AUTO_UPDATES), ID_AUTO_UPDATES);
         attach_hover_tracking(GetDlgItem(window, ID_UPDATE_LINK), ID_UPDATE_LINK);
         attach_hover_tracking(GetDlgItem(window, ID_MODE_BADGE), ID_MODE_BADGE);
-        attach_hover_tracking(GetDlgItem(window, ID_RESET_KEYMAP), ID_RESET_KEYMAP);
         shortcut_tooltip = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 RESET_HINT_CLASS, L"", WS_POPUP,
@@ -628,10 +633,11 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             GetCursorPos(&point);
             ScreenToClient(window, &point);
             if (source_key_at(point) >= 0 ||
+                reset_keymap_at(point) != 0 ||
                 id == ID_HOTKEY || id == ID_HOLD_HOTKEY ||
                 id == ID_AUTOSTART || id == ID_BLOCK_LETTERS ||
                 id == ID_AUTO_UPDATES || id == ID_UPDATE_LINK ||
-                id == ID_MODE_BADGE || id == ID_RESET_KEYMAP)
+                id == ID_MODE_BADGE)
                 SetCursor(LoadCursorW(NULL, IDC_HAND));
             else
                 SetCursor(LoadCursorW(NULL, IDC_ARROW));
@@ -682,25 +688,79 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
             TRACKMOUSEEVENT tracking = {sizeof(tracking), TME_LEAVE, window, HOVER_DEFAULT};
             POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
             int key_index;
+            int previous_reset_id = hovered_reset_id;
+            int previous_hint_id = hovered_hint_id;
+            int reset_id = reset_keymap_at(point);
             if (!mouse_leave_tracking && TrackMouseEvent(&tracking))
                 mouse_leave_tracking = 1;
             key_index = source_key_at(point);
+            hovered_reset_id = reset_id;
+            hovered_hint_id = reset_id;
             if (hovered_source_key != key_index) {
                 hovered_source_key = key_index;
                 InvalidateRect(window, NULL, FALSE);
+            }
+            if (previous_reset_id != hovered_reset_id)
+                InvalidateRect(window, NULL, FALSE);
+            if (previous_hint_id != hovered_hint_id) {
+                KillTimer(window, RESET_TOOLTIP_TIMER_ID);
+                update_reset_tooltip(window, 0);
+                if (hovered_hint_id != 0 &&
+                    SetTimer(window, RESET_TOOLTIP_TIMER_ID,
+                             RESET_TOOLTIP_DELAY_MS, NULL) == 0)
+                    update_reset_tooltip(window, hovered_hint_id);
             }
         }
         return 0;
     case WM_MOUSELEAVE:
         mouse_leave_tracking = 0;
+        if (hovered_reset_id == ID_RESET_KEYMAP) {
+            KillTimer(window, RESET_TOOLTIP_TIMER_ID);
+            update_reset_tooltip(window, 0);
+            hovered_reset_id = 0;
+            hovered_hint_id = 0;
+            InvalidateRect(window, NULL, FALSE);
+        }
         if (hovered_source_key >= 0) {
             hovered_source_key = -1;
             InvalidateRect(window, NULL, FALSE);
         }
         return 0;
+    case WM_TIMER:
+        if (wparam == RESET_TOOLTIP_TIMER_ID) {
+            KillTimer(window, RESET_TOOLTIP_TIMER_ID);
+            if (hovered_hint_id != 0)
+                update_reset_tooltip(window, hovered_hint_id);
+            return 0;
+        }
+        break;
+    case WM_LBUTTONDOWN:
+        {
+            POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+            int reset_id = reset_keymap_at(point);
+            if (reset_id != 0) {
+                pressed_reset_id = reset_id;
+                SetFocus(window);
+                SetCapture(window);
+                InvalidateRect(window, NULL, FALSE);
+                return 0;
+            }
+        }
+        break;
     case WM_LBUTTONUP:
         {
             POINT point = {(short)LOWORD(lparam), (short)HIWORD(lparam)};
+            if (pressed_reset_id == ID_RESET_KEYMAP) {
+                int activate = reset_keymap_at(point) == pressed_reset_id;
+                pressed_reset_id = 0;
+                if (GetCapture() == window)
+                    ReleaseCapture();
+                InvalidateRect(window, NULL, FALSE);
+                if (activate)
+                    SendMessageW(window, WM_COMMAND,
+                                 MAKEWPARAM(ID_RESET_KEYMAP, BN_CLICKED), 0);
+                return 0;
+            }
             int index = source_key_at(point);
             if (index >= 0) {
                 keymap_cancel_capture();
@@ -708,6 +768,12 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 ui_refresh();
                 return 0;
             }
+        }
+        break;
+    case WM_CAPTURECHANGED:
+        if (pressed_reset_id == ID_RESET_KEYMAP) {
+            pressed_reset_id = 0;
+            InvalidateRect(window, NULL, FALSE);
         }
         break;
     case WM_COMMAND:

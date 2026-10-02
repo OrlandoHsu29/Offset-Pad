@@ -188,6 +188,16 @@ static int hotkey_is_set(keymap_hotkey hotkey)
     return hotkey.modifiers != 0 || hotkey.key != 0;
 }
 
+static void draw_reset_icon(HDC dc, RECT circle, int reset_id)
+{
+    COLORREF fill = pressed_reset_id == reset_id ? COLOR_ACCENT_DOWN :
+                    (hovered_reset_id == reset_id ? COLOR_RESET_HOVER : COLOR_ACCENT);
+    rounded_box(dc, circle, fill, fill, 8);
+    OffsetRect(&circle, 0, -scale(1));
+    draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
+               COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+}
+
 static void paint_settings(HDC dc, const RECT *client)
 {
     RECT rect;
@@ -328,6 +338,7 @@ static void paint_settings(HDC dc, const RECT *client)
                        DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
     }
+    draw_reset_icon(dc, scaled_rect(376, 216, 392, 232), ID_RESET_KEYMAP);
     rect = scaled_rect(185, 491, 400, 510);
     draw_label(dc, L"关闭窗口后会继续在托盘运行", rect, small_font, COLOR_MUTED,
                DT_SINGLELINE | DT_RIGHT | DT_VCENTER);
@@ -354,16 +365,6 @@ static void draw_setting_card(const DRAWITEMSTRUCT *item)
                    (int)(sizeof(label) / sizeof(label[0])));
     draw_label(item->hDC, label, rect, small_font, COLOR_INK,
                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-}
-
-static void draw_reset_icon(HDC dc, RECT circle, int reset_id)
-{
-    COLORREF fill = pressed_reset_id == reset_id ? COLOR_ACCENT_DOWN :
-                    (hovered_reset_id == reset_id ? COLOR_RESET_HOVER : COLOR_ACCENT);
-    rounded_box(dc, circle, fill, fill, 8);
-    OffsetRect(&circle, 0, -scale(1));
-    draw_label(dc, L"\x21BB", circle, icon_font != NULL ? icon_font : body_font,
-               COLOR_WHITE, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 }
 
 static void draw_button_content(const DRAWITEMSTRUCT *item)
@@ -461,16 +462,6 @@ static void draw_button_content(const DRAWITEMSTRUCT *item)
                            rect.right - scale(8), rect.top + scale(21)};
             draw_reset_icon(dc, circle, reset_id);
         }
-        return;
-    }
-
-    if (item->CtlID == ID_RESET_KEYMAP) {
-        int diameter = scale(16);
-        RECT circle = {rect.left + (rect.right - rect.left - diameter) / 2,
-                       rect.top + (rect.bottom - rect.top - diameter) / 2,
-                       rect.left + (rect.right - rect.left + diameter) / 2,
-                       rect.top + (rect.bottom - rect.top + diameter) / 2};
-        draw_reset_icon(dc, circle, ID_RESET_KEYMAP);
         return;
     }
 
