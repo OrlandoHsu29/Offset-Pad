@@ -45,14 +45,7 @@ static UINT active_timer_delay;
 static unsigned char mock_os_key_down[256];
 static DWORD mock_language_mode = 1U;
 static int mock_shift_toggles_ime;
-static int defer_compensation_timer_for_test;
 static int mock_track_injected_modifier_state;
-
-static void fire_mock_ime_timer(void)
-{
-    if (!defer_compensation_timer_for_test && active_timer_id == KEYMAP_COMPENSATION_TIMER_ID)
-        keymap_handle_timer(KEYMAP_COMPENSATION_TIMER_ID);
-}
 
 static SHORT WINAPI mock_get_async_key_state(int key)
 {
@@ -108,6 +101,10 @@ static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
     assert(sent_count + count <= sizeof(sent_inputs) / sizeof(sent_inputs[0]));
     for (index = 0; index < count; ++index) {
         sent_inputs[sent_count++] = input[index];
+        if (mock_shift_toggles_ime && input[index].ki.wVk == VK_LSHIFT &&
+            (input[index].ki.dwFlags & KEYEVENTF_KEYUP) &&
+            mock_os_key_down[VK_LSHIFT])
+            mock_language_mode ^= 1U;
         if (mock_track_injected_modifier_state) {
             size_t modifier_index;
             for (modifier_index = 0; modifier_index < SIDE_MODIFIER_COUNT; ++modifier_index) {
@@ -118,12 +115,15 @@ static UINT WINAPI mock_send_input(UINT count, LPINPUT input, int size)
                 }
             }
         }
-        if (input[index].ki.wVk == VK_CAPITAL &&
-            !(input[index].ki.dwFlags & KEYEVENTF_KEYUP))
-            mock_caps_lock_on = !mock_caps_lock_on;
-        if (mock_shift_toggles_ime && input[index].ki.wVk == VK_LSHIFT &&
-            !(input[index].ki.dwFlags & KEYEVENTF_KEYUP))
-            mock_language_mode ^= 1U;
+        if (input[index].ki.wVk == VK_CAPITAL) {
+            if (input[index].ki.dwFlags & KEYEVENTF_KEYUP) {
+                mock_os_key_down[VK_CAPITAL] = 0;
+            } else {
+                if (!mock_os_key_down[VK_CAPITAL])
+                    mock_caps_lock_on = !mock_caps_lock_on;
+                mock_os_key_down[VK_CAPITAL] = 1;
+            }
+        }
     }
     return count;
 }
@@ -138,9 +138,15 @@ static LRESULT key_event(DWORD key, WPARAM message)
 static LRESULT caps_event(int down)
 {
     LRESULT result = key_event(VK_CAPITAL, down ? WM_KEYDOWN : WM_KEYUP);
-    if (down && result == 0)
-        mock_caps_lock_on = !mock_caps_lock_on;
-    fire_mock_ime_timer();
+    if (result == 0) {
+        if (down) {
+            if (!mock_os_key_down[VK_CAPITAL])
+                mock_caps_lock_on = !mock_caps_lock_on;
+            mock_os_key_down[VK_CAPITAL] = 1;
+        } else {
+            mock_os_key_down[VK_CAPITAL] = 0;
+        }
+    }
     return result;
 }
 
@@ -149,13 +155,15 @@ static void modifier(DWORD key, int down)
     if (key == VK_CAPITAL)
         caps_event(down);
     else {
-        if (key < 256)
-            mock_os_key_down[key] = down != 0;
+        unsigned char was_down = key < 256 ? mock_os_key_down[key] : 0;
+        if (key < 256 && down)
+            mock_os_key_down[key] = 1;
         LRESULT result = key_event(key, down ? WM_KEYDOWN : WM_KEYUP);
+        if (key < 256)
+            mock_os_key_down[key] = result == 0 ? down != 0 : was_down;
         if (!down && result == 0 &&
             (key == VK_LSHIFT || key == VK_RSHIFT) && mock_shift_toggles_ime)
             mock_language_mode ^= 1U;
-        fire_mock_ime_timer();
     }
 }
 
@@ -267,16 +275,13 @@ int main(void)
     modifier(VK_LCONTROL, 1);
     assert(keymap_is_enabled());
     modifier(VK_LCONTROL, 0);
-    assert(caps_event(0) == 0);
-    if (active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID)
-        keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    assert(caps_event(0) == 1);
     keymap_set_enabled(0);
 
     /* Default Caps+Shift hold works in either order and restores Caps state. */
     keymap_set_enabled(0);
     mock_caps_lock_on = 0;
     active_timer_id = 0;
-    clear_shift_compensation();
     modifier(VK_LSHIFT, 1);
     assert(caps_event(1) == 1 && hold_active && !mock_caps_lock_on);
     sent_count = 0;
@@ -285,14 +290,11 @@ int main(void)
     assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
     assert(caps_event(0) == 1 && !hold_active);
     modifier(VK_LSHIFT, 0);
-    if (active_timer_id == KEYMAP_COMPENSATION_TIMER_ID)
-        keymap_handle_timer(KEYMAP_COMPENSATION_TIMER_ID);
     assert(!mock_caps_lock_on && !keymap_is_enabled());
 
-    /* Injected Shift-up must not erase the physical Shift state used by Caps+Shift. */
+    /* Hold input defers and then consumes Shift as part of the chord. */
     mock_caps_lock_on = 0;
     active_timer_id = 0;
-    clear_shift_compensation();
     sent_count = 0;
     mock_track_injected_modifier_state = 1;
     mock_os_key_down[VK_LSHIFT] = 0;
@@ -310,13 +312,12 @@ int main(void)
     mock_track_injected_modifier_state = 0;
     mock_caps_lock_on = 0;
     active_timer_id = 0;
-    clear_shift_compensation();
     assert(caps_event(1) == 0 && mock_caps_lock_on);
     modifier(VK_LSHIFT, 1);
-    assert(hold_active && caps_restore == CAPS_RESTORE_ON_RELEASE);
-    assert(caps_event(0) == 0 && !hold_active);
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
+    assert(hold_active && caps_restore == CAPS_RESTORE_COMPLETED);
+    assert(!mock_caps_lock_on);
+    assert(caps_event(0) == 1 && !hold_active);
+    assert(caps_restore == CAPS_RESTORE_IDLE);
     modifier(VK_LSHIFT, 0);
     assert(!mock_caps_lock_on && !keymap_is_enabled());
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
@@ -355,63 +356,155 @@ int main(void)
     assert(caps_event(0) == 0 && mock_caps_lock_on);
     assert(caps_event(1) == 0 && !mock_caps_lock_on);
     assert(caps_event(0) == 0 && !mock_caps_lock_on);
-    /* Caps+Shift sends a compensating Shift tap after release. */
+    /* A Caps+Shift toggle shortcut keeps its existing Shift-up behavior. */
     keymap_set_enabled(0);
     mock_caps_lock_on = 0;
-    clear_shift_compensation();
-    active_timer_id = 0;
     mock_language_mode = 1U;
     mock_shift_toggles_ime = 1;
-    defer_compensation_timer_for_test = 1;
+    sent_count = 0;
     modifier(VK_LSHIFT, 1);
-    assert(shift_compensation.key == VK_LSHIFT);
     assert(caps_event(1) == 1);
-    assert(shift_compensation.pending);
-    assert(keymap_is_enabled() && !mock_caps_lock_on);
-    assert(caps_event(0) == 1);
-    assert(shift_compensation.pending);
-    modifier(VK_LSHIFT, 0);
-    assert(mock_language_mode == 0);
-    assert(active_timer_id == KEYMAP_COMPENSATION_TIMER_ID);
-    keymap_handle_timer(KEYMAP_COMPENSATION_TIMER_ID);
     assert(mock_language_mode == 1U);
-    defer_compensation_timer_for_test = 0;
-    mock_shift_toggles_ime = 0;
     assert(keymap_is_enabled() && !mock_caps_lock_on);
+    assert(caps_event(0) == 1 && mock_language_mode == 1U);
+    modifier(VK_LSHIFT, 0);
+    assert(mock_language_mode == 0U);
+    assert(!mock_caps_lock_on);
+    {
+        size_t index;
+        for (index = 0; index < sent_count; ++index)
+            assert(sent_inputs[index].ki.wVk != VK_LSHIFT ||
+                   (sent_inputs[index].ki.dwFlags & KEYEVENTF_KEYUP));
+    }
+    mock_shift_toggles_ime = 0;
     keymap_set_enabled(0);
 
-    /* Caps-first order passes Caps through, but swallows the Shift completing the chord. */
-    clear_shift_compensation();
-    active_timer_id = 0;
+    /* Repeated Caps while Shift stays down must preserve its real key-up. */
+    {
+    keymap_hotkey saved_toggle = keymap_get_hotkey();
+    keymap_hotkey saved_hold = keymap_get_hold_hotkey();
+    keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_CAPS, 0},
+                       (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
+    mock_track_injected_modifier_state = 1;
+    mock_os_key_down[VK_LSHIFT] = 0;
+    mock_language_mode = 1U;
+    mock_shift_toggles_ime = 1;
+    modifier(VK_LSHIFT, 1);
+    assert(caps_event(1) == 1 && hold_active && mock_language_mode == 1U);
+    key_event('N', WM_KEYDOWN);
+    key_event('N', WM_KEYUP);
+    assert(caps_event(0) == 1 && !hold_active);
+    assert(caps_event(1) == 1 && hold_active && mock_language_mode == 1U);
+    modifier(VK_LSHIFT, 0);
+    assert(!hold_active && mock_language_mode == 1U);
+    modifier(VK_LSHIFT, 1);
+    assert(hold_active && mock_language_mode == 1U);
+    assert(caps_event(0) == 1 && !hold_active);
+    modifier(VK_LSHIFT, 0);
+    assert(mock_language_mode == 1U);
+    mock_track_injected_modifier_state = 0;
+    mock_os_key_down[VK_LSHIFT] = 0;
+    mock_shift_toggles_ime = 0;
+    keymap_set_enabled(0);
+    keymap_set_hotkeys(saved_toggle, saved_hold);
+    }
+
+    /* A standalone Shift tap is replayed at release and keeps its native action. */
+    {
+        keymap_hotkey saved_toggle = keymap_get_hotkey();
+        keymap_hotkey saved_hold = keymap_get_hold_hotkey();
+        keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_CAPS, 0},
+                           (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
+        mock_track_injected_modifier_state = 1;
+        mock_shift_toggles_ime = 1;
+        mock_language_mode = 1U;
+        mock_os_key_down[VK_LSHIFT] = 0;
+        sent_count = 0;
+        modifier(VK_LSHIFT, 1);
+        assert(mock_language_mode == 1U && !mock_os_key_down[VK_LSHIFT]);
+        modifier(VK_LSHIFT, 0);
+        assert(mock_language_mode == 0U && !mock_os_key_down[VK_LSHIFT]);
+        assert(sent_count == 2 && sent_inputs[0].ki.wVk == VK_LSHIFT &&
+               sent_inputs[0].ki.dwFlags == 0 &&
+               sent_inputs[1].ki.wVk == VK_LSHIFT &&
+               sent_inputs[1].ki.dwFlags == KEYEVENTF_KEYUP);
+        mock_track_injected_modifier_state = 0;
+        mock_shift_toggles_ime = 0;
+        keymap_set_hotkeys(saved_toggle, saved_hold);
+    }
+
+    /* A fast Shift+letter replays Shift-down before forwarding the letter. */
+    {
+        keymap_hotkey saved_toggle = keymap_get_hotkey();
+        keymap_hotkey saved_hold = keymap_get_hold_hotkey();
+        keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_CAPS, 0},
+                           (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
+        keymap_set_enabled(0);
+        mock_track_injected_modifier_state = 1;
+        mock_shift_toggles_ime = 1;
+        mock_language_mode = 1U;
+        mock_os_key_down[VK_LSHIFT] = 0;
+        sent_count = 0;
+        modifier(VK_LSHIFT, 1);
+        assert(!mock_os_key_down[VK_LSHIFT]);
+        assert(key_event('A', WM_KEYDOWN) == 0);
+        assert(mock_os_key_down[VK_LSHIFT]);
+        assert(sent_count == 1 && sent_inputs[0].ki.wVk == VK_LSHIFT &&
+               sent_inputs[0].ki.dwFlags == 0);
+        assert(key_event('A', WM_KEYUP) == 0);
+        modifier(VK_LSHIFT, 0);
+        assert(mock_language_mode == 0U && !mock_os_key_down[VK_LSHIFT]);
+        mock_track_injected_modifier_state = 0;
+        mock_shift_toggles_ime = 0;
+        keymap_set_hotkeys(saved_toggle, saved_hold);
+    }
+
+    /* A Ctrl+Shift modifier shortcut must leave Ctrl+Shift+X available. */
+    {
+        keymap_hotkey saved_toggle = keymap_get_hotkey();
+        keymap_hotkey saved_hold = keymap_get_hold_hotkey();
+        int saved_block_unmapped = keymap_block_unmapped_enabled();
+        keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 0},
+                           (keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
+        keymap_set_block_unmapped(0);
+        keymap_set_enabled(0);
+        modifier(VK_LCONTROL, 1);
+        modifier(VK_LSHIFT, 1);
+        assert(keymap_is_enabled());
+        assert(key_event('X', WM_KEYDOWN) == 0);
+        key_event('X', WM_KEYUP);
+        modifier(VK_LSHIFT, 0);
+        modifier(VK_LCONTROL, 0);
+        keymap_set_enabled(0);
+        keymap_set_hotkeys(saved_toggle, saved_hold);
+        keymap_set_block_unmapped(saved_block_unmapped);
+    }
+
+    /* Caps-first restores the lock immediately when Shift completes the chord. */
     mock_caps_lock_on = 0;
     mock_language_mode = 1U;
     mock_shift_toggles_ime = 1;
-    defer_compensation_timer_for_test = 1;
+    sent_count = 0;
     assert(caps_event(1) == 0 && mock_caps_lock_on);
     modifier(VK_LSHIFT, 1);
     assert(keymap_is_enabled() && keymap_is_visual_enabled());
+    assert(caps_restore == CAPS_RESTORE_COMPLETED && !mock_caps_lock_on);
     assert(captured_modifiers[4]);
-    assert(caps_event(0) == 0);
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
+    assert(sent_count >= 3);
+    assert(sent_inputs[sent_count - 3].ki.wVk == VK_CAPITAL &&
+           sent_inputs[sent_count - 3].ki.dwFlags == KEYEVENTF_KEYUP);
+    assert(sent_inputs[sent_count - 2].ki.wVk == VK_CAPITAL &&
+           sent_inputs[sent_count - 2].ki.dwFlags == 0);
+    assert(sent_inputs[sent_count - 1].ki.wVk == VK_CAPITAL &&
+           sent_inputs[sent_count - 1].ki.dwFlags == KEYEVENTF_KEYUP);
+    assert(caps_event(0) == 1);
+    assert(caps_restore == CAPS_RESTORE_IDLE);
     modifier(VK_LSHIFT, 0);
     assert(!captured_modifiers[4]);
     assert(mock_language_mode == 1U);
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
     assert(!mock_caps_lock_on);
-    defer_compensation_timer_for_test = 0;
     mock_shift_toggles_ime = 0;
     keymap_set_enabled(0);
-
-    assert(caps_event(1) == 0 && mock_caps_lock_on);
-    modifier(VK_LSHIFT, 1);
-    assert(keymap_is_enabled() && mock_caps_lock_on);
-    assert(caps_event(0) == 0 && mock_caps_lock_on);
-    assert(active_timer_id == KEYMAP_CAPS_RELEASE_TIMER_ID);
-    keymap_handle_timer(KEYMAP_CAPS_RELEASE_TIMER_ID);
-    assert(!mock_caps_lock_on);
-    modifier(VK_LSHIFT, 0);
-    assert(keymap_is_enabled() && !mock_caps_lock_on);
 
     /* A standalone Caps binding is rejected for hold input too. */
     keymap_begin_hold_capture();
@@ -442,7 +535,6 @@ int main(void)
     keymap_set_enabled(0);
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
                        (keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
-    clear_shift_compensation();
     active_timer_id = 0;
 
     /* Modifier-first Caps+Shift toggles without changing Caps state. */
@@ -946,6 +1038,7 @@ int main(void)
     modifier(VK_LCONTROL, 0);
 
     /* Rapid mapped keys do not release a key-specific hold while its chord remains down. */
+    mock_track_injected_modifier_state = 1;
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 'F'});
     modifier(VK_LCONTROL, 1);
     modifier(VK_LSHIFT, 1);
@@ -964,6 +1057,7 @@ int main(void)
     modifier(VK_LSHIFT, 0);
     key_event('F', WM_KEYUP);
     assert(!keymap_is_enabled() && !hold_active);
+    mock_track_injected_modifier_state = 0;
 
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
     /* Capture rejects reserved and mapped keys; Delete clears the hold binding. */
