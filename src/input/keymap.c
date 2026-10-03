@@ -510,10 +510,10 @@ static int send_character(WORD character)
 {
     INPUT input[2] = {0};
     UINT inserted;
-    if (character >= L'0' && character <= L'9' && keymap_is_enabled() &&
-        !output_modifier_is_active()) {
+    if (((character >= L'0' && character <= L'9') || character == L'.') &&
+        keymap_is_enabled() && !output_modifier_is_active()) {
         input[0].type = INPUT_KEYBOARD;
-        input[0].ki.wVk = (WORD)character;
+        input[0].ki.wVk = character == L'.' ? VK_DECIMAL : (WORD)character;
         input[1] = input[0];
         input[1].ki.dwFlags = KEYEVENTF_KEYUP;
         inserted = SendInput(2, input, sizeof(input[0]));

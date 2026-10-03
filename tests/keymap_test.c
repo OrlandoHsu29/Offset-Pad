@@ -1105,14 +1105,16 @@ int main(void)
     keymap_set_enabled(1);
     assert(key_event(VK_OEM_PERIOD, WM_KEYDOWN) == 1);
     assert(key_event(VK_OEM_PERIOD, WM_KEYUP) == 1);
-    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'.');
+    assert(sent_count == 2 && sent_inputs[0].ki.wVk == VK_DECIMAL &&
+           sent_inputs[0].ki.dwFlags == 0 && sent_inputs[1].ki.wVk == VK_DECIMAL &&
+           sent_inputs[1].ki.dwFlags == KEYEVENTF_KEYUP);
     keymap_begin_source_capture(10);
     assert(key_event('P', WM_KEYDOWN) == 1);
     assert(keymap_get_source(10) == 'P');
     assert(key_event('P', WM_KEYUP) == 1);
     key_event('P', WM_KEYDOWN);
     key_event('P', WM_KEYUP);
-    assert(sent_count == 4 && sent_inputs[2].ki.wScan == L'.');
+    assert(sent_count == 4 && sent_inputs[2].ki.wVk == VK_DECIMAL);
     assert(keymap_set_sources(defaults));
     keymap_begin_source_capture(6);
     assert(key_event(VK_OEM_PERIOD, WM_KEYDOWN) == 1);
@@ -1123,7 +1125,7 @@ int main(void)
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
     assert(sent_count == 8 && sent_inputs[4].ki.wVk == L'1' &&
-           sent_inputs[6].ki.wScan == L'.');
+           sent_inputs[6].ki.wVk == VK_DECIMAL);
     assert(keymap_set_sources(defaults));
     keymap_set_enabled(0);
     keymap_set_preview_message(TEST_PREVIEW_MESSAGE);
@@ -1169,7 +1171,7 @@ int main(void)
         keymap_set_enabled(1);
         sent_count = 0;
         modifier(VK_RCONTROL, 1);
-        assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'.' &&
+        assert(sent_count == 2 && sent_inputs[0].ki.wVk == VK_DECIMAL &&
                (active_modifiers() & KEYMAP_MOD_RCTRL) == 0);
         assert(key_event('U', WM_KEYDOWN) == 1);
         assert(key_event('U', WM_KEYUP) == 1);
