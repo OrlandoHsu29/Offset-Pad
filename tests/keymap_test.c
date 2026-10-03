@@ -291,7 +291,7 @@ int main(void)
     sent_count = 0;
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    assert(sent_count == 2 && sent_inputs[0].ki.wVk == L'1');
     assert(caps_event(0) == 1 && !hold_active);
     modifier(VK_LSHIFT, 0);
     assert(!mock_caps_lock_on && !keymap_is_enabled());
@@ -309,7 +309,7 @@ int main(void)
     assert(hold_active && keymap_is_visual_enabled());
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(hold_active && sent_inputs[sent_count - 2].ki.wScan == L'1');
+    assert(hold_active && sent_inputs[sent_count - 2].ki.wVk == L'1');
     caps_event(0);
     assert(!hold_active);
     modifier(VK_LSHIFT, 0);
@@ -731,14 +731,10 @@ int main(void)
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
     assert(sent_count == 4 && send_calls == 2);
-    assert(sent_inputs[0].ki.wVk == 0 && sent_inputs[0].ki.wScan == L'1' &&
-           sent_inputs[0].ki.dwFlags == KEYEVENTF_UNICODE);
-    assert(sent_inputs[1].ki.wVk == 0 && sent_inputs[1].ki.wScan == L'1' &&
-           sent_inputs[1].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
-    assert(sent_inputs[2].ki.wScan == L'1' &&
-           sent_inputs[2].ki.dwFlags == KEYEVENTF_UNICODE);
-    assert(sent_inputs[3].ki.wScan == L'1' &&
-           sent_inputs[3].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    assert(sent_inputs[0].ki.wVk == L'1' && sent_inputs[0].ki.dwFlags == 0);
+    assert(sent_inputs[1].ki.wVk == L'1' && sent_inputs[1].ki.dwFlags == KEYEVENTF_KEYUP);
+    assert(sent_inputs[2].ki.wVk == L'1' && sent_inputs[2].ki.dwFlags == 0);
+    assert(sent_inputs[3].ki.wVk == L'1' && sent_inputs[3].ki.dwFlags == KEYEVENTF_KEYUP);
 
     sent_count = 0;
     send_calls = 0;
@@ -747,14 +743,10 @@ int main(void)
     key_event('N', WM_KEYUP);
     key_event('O', WM_KEYUP);
     assert(sent_count == 4 && send_calls == 2);
-    assert(sent_inputs[0].ki.wScan == L'1' &&
-           sent_inputs[0].ki.dwFlags == KEYEVENTF_UNICODE);
-    assert(sent_inputs[1].ki.wScan == L'1' &&
-           sent_inputs[1].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
-    assert(sent_inputs[2].ki.wScan == L'9' &&
-           sent_inputs[2].ki.dwFlags == KEYEVENTF_UNICODE);
-    assert(sent_inputs[3].ki.wScan == L'9' &&
-           sent_inputs[3].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    assert(sent_inputs[0].ki.wVk == L'1' && sent_inputs[0].ki.dwFlags == 0);
+    assert(sent_inputs[1].ki.wVk == L'1' && sent_inputs[1].ki.dwFlags == KEYEVENTF_KEYUP);
+    assert(sent_inputs[2].ki.wVk == L'9' && sent_inputs[2].ki.dwFlags == 0);
+    assert(sent_inputs[3].ki.wVk == L'9' && sent_inputs[3].ki.dwFlags == KEYEVENTF_KEYUP);
 
     keymap_set_enabled(0);
     key_event('N', WM_KEYDOWN);
@@ -801,7 +793,7 @@ int main(void)
     sent_count = 0;
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    assert(sent_count == 2 && sent_inputs[0].ki.wVk == L'1');
     keymap_begin_source_capture(6);
     assert(key_event('B', WM_KEYDOWN) == 1);
     assert(keymap_get_source(6) == 'B');
@@ -933,7 +925,7 @@ int main(void)
     sent_count = 0;
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    assert(sent_count == 2 && sent_inputs[0].ki.wVk == L'1');
     keymap_set_block_unmapped(1);
     assert(key_event(VK_OEM_1, WM_KEYDOWN) == 1);
     assert(key_event(VK_OEM_1, WM_KEYUP) == 1);
@@ -1036,7 +1028,7 @@ int main(void)
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
     assert(keymap_is_enabled() && hold_active && !hold_provisional);
-    assert(sent_count == 2 && sent_inputs[0].ki.wScan == L'1');
+    assert(sent_count == 2 && sent_inputs[0].ki.wVk == L'1');
     modifier(VK_LSHIFT, 0);
     assert(!keymap_is_enabled());
     modifier(VK_LCONTROL, 0);
@@ -1130,7 +1122,7 @@ int main(void)
     key_event(VK_OEM_PERIOD, WM_KEYUP);
     key_event('N', WM_KEYDOWN);
     key_event('N', WM_KEYUP);
-    assert(sent_count == 8 && sent_inputs[4].ki.wScan == L'1' &&
+    assert(sent_count == 8 && sent_inputs[4].ki.wVk == L'1' &&
            sent_inputs[6].ki.wScan == L'.');
     assert(keymap_set_sources(defaults));
     keymap_set_enabled(0);
@@ -1182,7 +1174,7 @@ int main(void)
         assert(key_event('U', WM_KEYDOWN) == 1);
         assert(key_event('U', WM_KEYUP) == 1);
         modifier(VK_RCONTROL, 0);
-        assert(keymap_is_enabled() && sent_inputs[2].ki.wScan == L'7');
+        assert(keymap_is_enabled() && sent_inputs[2].ki.wVk == L'7');
 
         sent_count = 0;
         modifier(VK_LCONTROL, 1);

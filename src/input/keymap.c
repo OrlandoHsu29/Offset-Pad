@@ -491,10 +491,40 @@ static void sync_hold_input_layer(void)
     }
 }
 
+static int output_modifier_is_active(void)
+{
+    size_t index;
+    for (index = 0; index < SIDE_MODIFIER_COUNT; ++index) {
+        if (!modifiers[index] || captured_modifiers[index] ||
+            hold_key_is_swallowed(modifier_keys[index]))
+            continue;
+        if ((index == 4 && hold_shift_pending[0]) ||
+            (index == 5 && hold_shift_pending[1]))
+            continue;
+        return 1;
+    }
+    return 0;
+}
+
 static int send_character(WORD character)
 {
     INPUT input[2] = {0};
     UINT inserted;
+    if (character >= L'0' && character <= L'9' && keymap_is_enabled() &&
+        !output_modifier_is_active()) {
+        input[0].type = INPUT_KEYBOARD;
+        input[0].ki.wVk = (WORD)character;
+        input[1] = input[0];
+        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        inserted = SendInput(2, input, sizeof(input[0]));
+        if (inserted == 1) {
+            input[0].ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(1, input, sizeof(input[0]));
+        }
+        if (inserted != 0)
+            return 1;
+    }
+    ZeroMemory(input, sizeof(input));
     input[0].type = INPUT_KEYBOARD;
     input[0].ki.wScan = character;
     input[0].ki.dwFlags = KEYEVENTF_UNICODE;
