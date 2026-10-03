@@ -1356,6 +1356,9 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             }
             return CallNextHookEx(hook, code, message, parameter);
         }
+        if (hotkey.key == 0 && hotkey.modifiers != 0 &&
+            !modifiers_contain(mask, hotkey.modifiers))
+            chord_down = 0;
         if (captured_modifiers[modifier]) {
             if (released)
                 captured_modifiers[modifier] = 0;
@@ -1403,13 +1406,12 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         }
 
         if (hotkey.key == 0 && hotkey.modifiers != 0) {
-            if (!modifiers_contain(mask, hotkey.modifiers))
-                chord_down = 0;
-            else if (hotkeys_enabled && (!hold_active || hold_provisional) && !released &&
-                     (modifiers_equal(mask, hotkey.modifiers) ||
-                      (hold_provisional &&
-                       modifiers_contain(mask, hotkey.modifiers))) && !chord_down &&
-                     !block_hotkey_until_clear) {
+            if (modifiers_contain(mask, hotkey.modifiers) && hotkeys_enabled &&
+                (!hold_active || hold_provisional) && !released &&
+                (modifiers_equal(mask, hotkey.modifiers) ||
+                 (hold_provisional &&
+                  modifiers_contain(mask, hotkey.modifiers))) && !chord_down &&
+                !block_hotkey_until_clear) {
                 chord_down = 1;
                 if (hold_provisional) {
                     clear_hold_provisional();

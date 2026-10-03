@@ -264,9 +264,13 @@ int main(void)
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS, 0});
     assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
 
-    /* Default Ctrl+Caps Lock toggles in either press order. */
+    /* Ctrl+Caps toggles on each Caps press while Ctrl remains held. */
     keymap_set_enabled(0);
     modifier(VK_LCONTROL, 1);
+    assert(caps_event(1) == 1 && keymap_is_enabled());
+    assert(caps_event(0) == 1);
+    assert(caps_event(1) == 1 && !keymap_is_enabled());
+    assert(caps_event(0) == 1);
     assert(caps_event(1) == 1 && keymap_is_enabled());
     assert(caps_event(0) == 1);
     modifier(VK_LCONTROL, 0);
