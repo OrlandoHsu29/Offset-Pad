@@ -185,6 +185,8 @@ int main(void)
     DWORD previous_default_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16;
     DWORD previous_ctrl_default_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_CTRL) << 16;
     DWORD old_alt_caps_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT) << 16;
+    DWORD alt_win_caps_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT | KEYMAP_MOD_WIN) << 16;
+    DWORD legacy_default_hold_hotkey = (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16;
     DWORD previous_default_hold_hotkey = KEYMAP_MOD_CAPS << 16;
     DWORD migrated_sources[KEYMAP_KEY_COUNT];
     DWORD legacy_sources[10] = {
@@ -195,7 +197,7 @@ int main(void)
     assert(settings_load_block_unmapped());
     assert(settings_load_hotkeys_enabled());
     assert(settings_default_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
-    assert(settings_default_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(settings_default_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
 
     set_raw_value(L"SourceKeys", REG_BINARY, (const BYTE *)legacy_sources,
                   sizeof(legacy_sources));
@@ -259,20 +261,36 @@ int main(void)
     assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
     assert(hotkey.key == 0);
 
-    hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    set_raw_value(L"ToggleHotkey", REG_DWORD,
+                  (const BYTE *)&alt_win_caps_hotkey, sizeof(alt_win_caps_hotkey));
+    hotkey = settings_load_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL));
     assert(hotkey.key == 0);
+
+    hotkey = settings_load_hold_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
+    assert(hotkey.key == 0);
+    set_raw_value(L"HoldHotkey", REG_DWORD,
+                  (const BYTE *)&alt_win_caps_hotkey, sizeof(alt_win_caps_hotkey));
+    hotkey = settings_load_hold_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
+    assert(hotkey.key == 0);
+    set_raw_value(L"HoldHotkey", REG_DWORD,
+                  (const BYTE *)&legacy_default_hold_hotkey,
+                  sizeof(legacy_default_hold_hotkey));
+    hotkey = settings_load_hold_hotkey();
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
     set_raw_value(L"HoldHotkey", REG_DWORD,
                   (const BYTE *)&previous_default_hold_hotkey,
                   sizeof(previous_default_hold_hotkey));
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
     {
         test_value *saved = find_value(L"HoldHotkey");
         DWORD persisted;
         assert(saved != NULL && saved->size == sizeof(persisted));
         memcpy(&persisted, saved->data, sizeof(persisted));
-        assert(persisted == ((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16));
+        assert(persisted == ((KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16));
     }
 
     assert(settings_save_block_unmapped(0));
@@ -325,7 +343,7 @@ int main(void)
     }
     set_raw_value(L"HoldHotkey", REG_DWORD, (const BYTE *)&malformed, sizeof(malformed) + 1);
     hotkey = settings_load_hold_hotkey();
-    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(hotkey.modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
     assert(hotkey.key == 0);
     assert(settings_save_hotkeys_enabled(1));
     fail_next_write = 1;

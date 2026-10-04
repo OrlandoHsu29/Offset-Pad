@@ -519,7 +519,7 @@ void ui_hotkey_capture_result(WPARAM result)
     switch (result) {
     case KEYMAP_CAPTURE_INVALID_ALT:
         lstrcpynW(hotkey_capture_status,
-                  L"alt + 不含 ctrl 或 win 的组合会导致文本框失去聚焦",
+                  L"此 Alt 组合易导致文本框失去聚焦，建议加入 Ctrl ",
                   (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
         break;
     case KEYMAP_CAPTURE_INVALID_COUNT:
@@ -806,7 +806,9 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 keymap_hotkey value = settings_default_hotkey();
                 keymap_cancel_capture();
                 hotkey_capture_status[0] = L'\0';
-                if (!settings_save_hotkey(value))
+                if (!keymap_can_set_hotkey(value))
+                    show_error(L"默认切换快捷键与按住输入快捷键冲突，请先修改按住输入快捷键。");
+                else if (!settings_save_hotkey(value))
                     show_error(L"无法保存快捷键设置。");
                 else
                     keymap_set_hotkey(value);
@@ -818,7 +820,9 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 keymap_hotkey value = settings_default_hold_hotkey();
                 keymap_cancel_capture();
                 hotkey_capture_status[0] = L'\0';
-                if (!settings_save_hold_hotkey(value))
+                if (!keymap_can_set_hold_hotkey(value))
+                    show_error(L"默认按住输入快捷键与切换快捷键冲突，请先修改切换快捷键。");
+                else if (!settings_save_hold_hotkey(value))
                     show_error(L"无法保存快捷键设置。");
                 else
                     keymap_set_hold_hotkey(value);
@@ -831,7 +835,9 @@ static LRESULT CALLBACK settings_proc(HWND window, UINT message, WPARAM wparam, 
                 keymap_cancel_capture();
                 hotkey_capture_status[0] = L'\0';
                 keymap_get_default_sources(sources);
-                if (!settings_save_sources(sources))
+                if (!keymap_can_set_sources(sources))
+                    show_error(L"默认按键映射与按住输入快捷键冲突，请先修改按住输入快捷键。");
+                else if (!settings_save_sources(sources))
                     show_error(L"\x65E0\x6CD5\x4FDD\x5B58\x6309\x952E\x6620\x5C04\x8BBE\x7F6E\x3002");
                 else
                     keymap_set_sources(sources);

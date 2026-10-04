@@ -30,6 +30,8 @@
                               KEYMAP_MOD_SHIFT_SIDES | KEYMAP_MOD_WIN_SIDES)
 #define KEYMAP_MOD_ALL       (KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | \
                               KEYMAP_MOD_WIN | KEYMAP_MOD_CAPS | KEYMAP_MOD_SIDE_ALL)
+#define KEYMAP_DEFAULT_TOGGLE_MODIFIERS (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL)
+#define KEYMAP_DEFAULT_HOLD_MODIFIERS   (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT)
 _Static_assert(KEYMAP_MOD_ALL <= 0xFFFFU, "modifier flags must fit persisted DWORD");
 #define KEYMAP_KEY_COUNT 11
 #define KEYMAP_HOLD_RESOLVE_TIMER_ID 0x4F50U
@@ -55,13 +57,16 @@ int keymap_is_latched(void);
 void keymap_set_hotkeys_enabled(int enabled);
 int keymap_hotkeys_enabled(void);
 void keymap_set_hold_hotkey(keymap_hotkey hotkey);
+int keymap_can_set_hold_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hold_hotkey(void);
 void keymap_set_hotkeys(keymap_hotkey hotkey, keymap_hotkey hold_hotkey);
 void keymap_set_block_unmapped(int enabled);
 int keymap_block_unmapped_enabled(void);
 void keymap_set_hotkey(keymap_hotkey hotkey);
+int keymap_can_set_hotkey(keymap_hotkey hotkey);
 keymap_hotkey keymap_get_hotkey(void);
 int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT]);
+int keymap_can_set_sources(const DWORD sources[KEYMAP_KEY_COUNT]);
 void keymap_get_sources(DWORD sources[KEYMAP_KEY_COUNT]);
 void keymap_get_default_sources(DWORD sources[KEYMAP_KEY_COUNT]);
 DWORD keymap_get_source(size_t index);

@@ -251,6 +251,9 @@ int main(void)
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 'K'}));
     assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT | KEYMAP_MOD_CTRL, 0}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT | KEYMAP_MOD_WIN, 0}));
+    assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT | KEYMAP_MOD_WIN, 0}) ==
+           KEYMAP_CAPTURE_INVALID_ALT);
     assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_ALT, 0}) ==
            KEYMAP_CAPTURE_INVALID_ALT);
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
@@ -275,6 +278,29 @@ int main(void)
            keymap_get_hotkey().key == 0);
     assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) &&
            keymap_get_hold_hotkey().key == 0);
+    {
+        keymap_hotkey default_toggle = keymap_get_hotkey();
+        keymap_hotkey default_hold = keymap_get_hold_hotkey();
+        DWORD candidate_sources[KEYMAP_KEY_COUNT];
+
+        keymap_set_hold_hotkey((keymap_hotkey){0, 0});
+        keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
+        keymap_set_hold_hotkey(default_toggle);
+        assert(!keymap_can_set_hotkey(default_toggle));
+
+        keymap_set_hold_hotkey((keymap_hotkey){0, 0});
+        keymap_set_hotkey(default_hold);
+        assert(!keymap_can_set_hold_hotkey(default_hold));
+
+        keymap_set_hotkey(default_toggle);
+        keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL, 'Q'});
+        keymap_get_default_sources(candidate_sources);
+        candidate_sources[0] = 'Q';
+        assert(!keymap_can_set_sources(candidate_sources));
+        assert(!keymap_set_sources(candidate_sources));
+        assert(keymap_get_source(0) == 'U');
+        keymap_set_hold_hotkey(default_hold);
+    }
     assert(!hold_hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 'K'}));
     assert(!hold_hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS, 0});

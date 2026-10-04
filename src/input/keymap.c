@@ -96,8 +96,8 @@ static int hotkey_win_other_seen[2];
 static int backspace_synthetic_down;
 static unsigned char hold_swallowed_keys[32];
 static unsigned char passed_keys[32];
-static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL, 0};
-static keymap_hotkey hold_hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT, 0};
+static keymap_hotkey hotkey = {KEYMAP_DEFAULT_TOGGLE_MODIFIERS, 0};
+static keymap_hotkey hold_hotkey = {KEYMAP_DEFAULT_HOLD_MODIFIERS, 0};
 static int hold_provisional;
 static int hold_timer_active;
 static int hold_provisional_was_latched;
@@ -790,7 +790,7 @@ void keymap_get_default_sources(DWORD sources[KEYMAP_KEY_COUNT])
         CopyMemory(sources, defaults, sizeof(defaults));
 }
 
-int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
+int keymap_can_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
 {
     size_t index;
     size_t other;
@@ -804,6 +804,14 @@ int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
             if (sources[index] == sources[other])
                 return 0;
     }
+    return 1;
+}
+
+int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
+{
+    size_t index;
+    if (!keymap_can_set_sources(sources))
+        return 0;
     release_mapped_keys();
     for (index = 0; index < KEYMAP_KEY_COUNT; ++index)
         keys[index].source = sources[index];
@@ -909,13 +917,25 @@ static int same_hotkey(keymap_hotkey left, keymap_hotkey right)
            modifier_requirements_overlap(left.modifiers, right.modifiers);
 }
 
+int keymap_can_set_hotkey(keymap_hotkey value)
+{
+    return (value.modifiers == 0 && value.key == 0) ||
+           (hotkey_valid(value) && !same_hotkey(value, hold_hotkey));
+}
+
+int keymap_can_set_hold_hotkey(keymap_hotkey value)
+{
+    return (value.modifiers == 0 && value.key == 0) ||
+           (hold_hotkey_valid(value) && !same_hotkey(value, hotkey));
+}
+
 void keymap_set_hotkey(keymap_hotkey value)
 {
     int empty = value.modifiers == 0 && value.key == 0;
     if (!empty && same_hotkey(value, hold_hotkey))
         return;
     if (!empty && !hotkey_valid(value)) {
-        value.modifiers = KEYMAP_MOD_CTRL | KEYMAP_MOD_CAPS;
+        value.modifiers = KEYMAP_DEFAULT_TOGGLE_MODIFIERS;
         value.key = 0;
     }
     replay_pending_shift_downs(0);
@@ -936,7 +956,7 @@ void keymap_set_hold_hotkey(keymap_hotkey value)
 {
     if ((value.modifiers != 0 || value.key != 0) &&
         (!hold_hotkey_valid(value) || same_hotkey(value, hotkey))) {
-        value = (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT, 0};
+        value = (keymap_hotkey){KEYMAP_DEFAULT_HOLD_MODIFIERS, 0};
         if (same_hotkey(value, hotkey)) {
             value.modifiers = 0;
             value.key = 0;
