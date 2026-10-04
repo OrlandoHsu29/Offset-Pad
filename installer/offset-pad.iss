@@ -50,7 +50,7 @@ chinesesimp.LaunchProgram=运行 Offset Pad
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "startmenu"; Description: "{cm:CreateStartMenuShortcuts}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "autostart"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: unchecked
+Name: "autostart"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:AdditionalTasks}"
 
 [Files]
 Source: "..\build\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
