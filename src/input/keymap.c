@@ -51,6 +51,7 @@ static mapped_key keys[KEYMAP_KEY_COUNT] = {
 };
 
 static HHOOK hook;
+static HHOOK mouse_hook;
 static HWND notify_window;
 static UINT changed_message;
 static UINT capture_message;
@@ -88,11 +89,15 @@ static int chord_down;
 static int hold_modifiers_suspended;
 static int hold_shift_passed[2];
 static int hold_shift_pending[2];
+static int hold_shift_other_seen[2];
+static int hotkey_win_passed[2];
+static int hotkey_win_pending[2];
+static int hotkey_win_other_seen[2];
 static int backspace_synthetic_down;
 static unsigned char hold_swallowed_keys[32];
 static unsigned char passed_keys[32];
 static keymap_hotkey hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL, 0};
-static keymap_hotkey hold_hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0};
+static keymap_hotkey hold_hotkey = {KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT, 0};
 static int hold_provisional;
 static int hold_timer_active;
 static int hold_provisional_was_latched;
@@ -129,6 +134,10 @@ static void sync_modifier_state_from_os(int current_modifier)
             continue;
         if ((index == 4 || index == 5) &&
             (hold_shift_pending[index - 4] ||
+             hold_key_is_swallowed(modifier_keys[index])))
+            continue;
+        if ((index == 6 || index == 7) &&
+            (hotkey_win_pending[index - 6] ||
              hold_key_is_swallowed(modifier_keys[index])))
             continue;
         modifiers[index] = (GetAsyncKeyState(modifier_keys[index]) & 0x8000) != 0;
@@ -291,33 +300,64 @@ static int any_hotkey_uses_caps(void)
     return hotkey_uses_caps(hotkey) || hotkey_uses_caps(hold_hotkey);
 }
 
-static void replay_pending_shift_downs(void)
+static void replay_pending_modifier_downs(int pending[2], int passed[2],
+                                         int other_seen[2], WORD left_key,
+                                         DWORD key_flags, int other_input_seen)
 {
     INPUT input[2] = {{0}};
     UINT count = 0;
     int side;
     for (side = 0; side < 2; ++side) {
-        if (!hold_shift_pending[side])
+        if (!pending[side])
             continue;
         input[count].type = INPUT_KEYBOARD;
-        input[count].ki.wVk = side == 0 ? VK_LSHIFT : VK_RSHIFT;
-        hold_shift_pending[side] = 0;
-        hold_shift_passed[side] = 1;
+        input[count].ki.wVk = side == 0 ? left_key : (WORD)(left_key + 1);
+        input[count].ki.dwFlags = key_flags;
+        pending[side] = 0;
+        passed[side] = 1;
+        other_seen[side] = other_input_seen;
         ++count;
     }
     if (count != 0)
         SendInput(count, input, sizeof(input[0]));
 }
 
-static void replay_pending_shift_tap(int side)
+static void replay_pending_modifier_tap(int pending[2], int side, WORD key,
+                                        DWORD key_flags)
 {
     INPUT input[2] = {{0}};
     input[0].type = INPUT_KEYBOARD;
-    input[0].ki.wVk = side == 0 ? VK_LSHIFT : VK_RSHIFT;
+    input[0].ki.wVk = key;
+    input[0].ki.dwFlags = key_flags;
     input[1] = input[0];
-    input[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    hold_shift_pending[side] = 0;
+    input[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    pending[side] = 0;
     SendInput(2, input, sizeof(input[0]));
+}
+
+static void replay_pending_shift_downs(int other_input_seen)
+{
+    replay_pending_modifier_downs(hold_shift_pending, hold_shift_passed,
+                                  hold_shift_other_seen, VK_LSHIFT, 0,
+                                  other_input_seen);
+}
+
+static void replay_pending_shift_tap(int side)
+{
+    replay_pending_modifier_tap(hold_shift_pending, side, VK_LSHIFT, 0);
+}
+
+static void replay_pending_win_downs(int other_input_seen)
+{
+    replay_pending_modifier_downs(hotkey_win_pending, hotkey_win_passed,
+                                  hotkey_win_other_seen, VK_LWIN,
+                                  KEYEVENTF_EXTENDEDKEY, other_input_seen);
+}
+
+static void replay_pending_win_tap(int side)
+{
+    replay_pending_modifier_tap(hotkey_win_pending, side, VK_LWIN,
+                                KEYEVENTF_EXTENDEDKEY);
 }
 
 static void restore_caps_lock_after_release(void);
@@ -478,6 +518,13 @@ static void sync_hold_input_layer(void)
                 } else if (!modifiers[index]) {
                     hold_shift_passed[side] = 0;
                 }
+            } else if ((index == 6 || index == 7) &&
+                       hotkey_win_pending[index - 6]) {
+                int side = (int)index - 6;
+                hold_swallow_key(modifier_keys[index], 0);
+                hotkey_win_pending[side] = 0;
+                hotkey_win_passed[side] = 0;
+                modifiers[index] = 0;
             } else if (modifiers[index]) {
                 hold_swallow_key(modifier_keys[index], 0);
             }
@@ -592,8 +639,10 @@ static void begin_hold_provisional(void)
 
 void keymap_set_hotkeys_enabled(int value)
 {
-    if (!value)
-        replay_pending_shift_downs();
+    if (!value) {
+        replay_pending_shift_downs(0);
+        replay_pending_win_downs(0);
+    }
     hotkeys_enabled = value != 0;
     chord_down = 0;
     block_hotkey_until_clear = 1;
@@ -748,7 +797,8 @@ int keymap_set_sources(const DWORD sources[KEYMAP_KEY_COUNT])
     if (sources == NULL)
         return 0;
     for (index = 0; index < KEYMAP_KEY_COUNT; ++index) {
-        if (!keymap_source_supported(sources[index]))
+        if (!keymap_source_supported(sources[index]) ||
+            (hold_hotkey.key != 0 && sources[index] == hold_hotkey.key))
             return 0;
         for (other = 0; other < index; ++other)
             if (sources[index] == sources[other])
@@ -834,6 +884,9 @@ static int validate_hotkey(keymap_hotkey value)
         (value.modifiers == 0 && source_in_use(value.key)))
         return key_count < 2 || key_count > 4 ?
                KEYMAP_CAPTURE_INVALID_COUNT : KEYMAP_CAPTURE_INVALID;
+    if (!(value.modifiers & (KEYMAP_MOD_CTRL_ANY | KEYMAP_MOD_ALT_ANY |
+                             KEYMAP_MOD_WIN_ANY | KEYMAP_MOD_CAPS)))
+        return KEYMAP_CAPTURE_INVALID_MODIFIER;
     if (alt_shortcut_is_unsafe(value))
         return KEYMAP_CAPTURE_INVALID_ALT;
     return KEYMAP_CAPTURE_SAVED;
@@ -846,7 +899,8 @@ static int hotkey_valid(keymap_hotkey value)
 
 static int hold_hotkey_valid(keymap_hotkey value)
 {
-    return hotkey_valid(value);
+    return hotkey_valid(value) &&
+           (value.key == 0 || !source_in_use(value.key));
 }
 
 static int same_hotkey(keymap_hotkey left, keymap_hotkey right)
@@ -861,10 +915,11 @@ void keymap_set_hotkey(keymap_hotkey value)
     if (!empty && same_hotkey(value, hold_hotkey))
         return;
     if (!empty && !hotkey_valid(value)) {
-        value.modifiers = KEYMAP_MOD_SHIFT;
-        value.key = VK_SPACE;
+        value.modifiers = KEYMAP_MOD_CTRL | KEYMAP_MOD_CAPS;
+        value.key = 0;
     }
-    replay_pending_shift_downs();
+    replay_pending_shift_downs(0);
+    replay_pending_win_downs(0);
     clear_hold_provisional();
     hold_suppressed_until_release = 0;
     hotkey = value;
@@ -881,13 +936,14 @@ void keymap_set_hold_hotkey(keymap_hotkey value)
 {
     if ((value.modifiers != 0 || value.key != 0) &&
         (!hold_hotkey_valid(value) || same_hotkey(value, hotkey))) {
-        value = (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0};
+        value = (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT, 0};
         if (same_hotkey(value, hotkey)) {
             value.modifiers = 0;
             value.key = 0;
         }
     }
-    replay_pending_shift_downs();
+    replay_pending_shift_downs(0);
+    replay_pending_win_downs(0);
     clear_hold_provisional();
     hold_suppressed_until_release = 0;
     set_hold_active(0);
@@ -934,12 +990,12 @@ void keymap_format_hotkey(wchar_t *buffer, size_t capacity, keymap_hotkey value)
     if (value.modifiers & KEYMAP_MOD_CTRL) append_hotkey_part(buffer, capacity, L"Ctrl");
     if (value.modifiers & KEYMAP_MOD_LCTRL) append_hotkey_part(buffer, capacity, L"LCtrl");
     if (value.modifiers & KEYMAP_MOD_RCTRL) append_hotkey_part(buffer, capacity, L"RCtrl");
-    if (value.modifiers & KEYMAP_MOD_ALT) append_hotkey_part(buffer, capacity, L"Alt");
-    if (value.modifiers & KEYMAP_MOD_LALT) append_hotkey_part(buffer, capacity, L"LAlt");
-    if (value.modifiers & KEYMAP_MOD_RALT) append_hotkey_part(buffer, capacity, L"RAlt");
     if (value.modifiers & KEYMAP_MOD_WIN) append_hotkey_part(buffer, capacity, L"Win");
     if (value.modifiers & KEYMAP_MOD_LWIN) append_hotkey_part(buffer, capacity, L"LWin");
     if (value.modifiers & KEYMAP_MOD_RWIN) append_hotkey_part(buffer, capacity, L"RWin");
+    if (value.modifiers & KEYMAP_MOD_ALT) append_hotkey_part(buffer, capacity, L"Alt");
+    if (value.modifiers & KEYMAP_MOD_LALT) append_hotkey_part(buffer, capacity, L"LAlt");
+    if (value.modifiers & KEYMAP_MOD_RALT) append_hotkey_part(buffer, capacity, L"RAlt");
     if (value.modifiers & KEYMAP_MOD_SHIFT) append_hotkey_part(buffer, capacity, L"Shift");
     if (value.modifiers & KEYMAP_MOD_LSHIFT) append_hotkey_part(buffer, capacity, L"LShift");
     if (value.modifiers & KEYMAP_MOD_RSHIFT) append_hotkey_part(buffer, capacity, L"RShift");
@@ -1027,16 +1083,25 @@ static int shift_down_may_start_caps_combo(int modifier)
                                  hold_hotkey.modifiers);
 }
 
-static int pending_shift_can_complete_caps_combo(void)
+static int modifier_down_may_start_hotkey(int modifier,
+                                         unsigned int modifier_family)
 {
-    unsigned int active = active_modifiers();
-    int completes_hold = hold_hotkey.key == 0 &&
-        (hold_hotkey.modifiers & KEYMAP_MOD_CAPS) &&
-        (hold_hotkey.modifiers & KEYMAP_MOD_SHIFT_ANY) &&
-        modifiers_equal(active | KEYMAP_MOD_CAPS, hold_hotkey.modifiers);
-    return hotkeys_enabled && !block_hotkey_until_clear &&
-           !(active & KEYMAP_MOD_CAPS) &&
-           completes_hold;
+    keymap_hotkey shortcuts[2] = {hotkey, hold_hotkey};
+    size_t index;
+    if (modifier < 0 || modifier >= SIDE_MODIFIER_COUNT || !hotkeys_enabled ||
+        block_hotkey_until_clear || (hold_active && !hold_provisional) ||
+        hotkey_capture_active() || keymap_is_source_capturing())
+        return 0;
+    for (index = 0; index < 2; ++index) {
+        keymap_hotkey shortcut = shortcuts[index];
+        if (!(shortcut.modifiers & modifier_family))
+            continue;
+        if (modifiers_can_extend(active_modifiers(), shortcut.modifiers) ||
+            (hold_provisional &&
+             modifiers_contain(active_modifiers(), shortcut.modifiers)))
+            return 1;
+    }
+    return 0;
 }
 
 static int capture_modifier_is_down(void)
@@ -1149,6 +1214,9 @@ static void finish_capture(keymap_hotkey value)
     int empty = value.modifiers == 0 && value.key == 0;
     int result = empty ? KEYMAP_CAPTURE_SAVED : validate_hotkey(value);
     UINT message = is_hold ? hold_capture_message : capture_message;
+    if (result == KEYMAP_CAPTURE_SAVED && is_hold && !empty &&
+        !hold_hotkey_valid(value))
+        result = KEYMAP_CAPTURE_INVALID;
     if (result == KEYMAP_CAPTURE_SAVED && !empty &&
         (is_hold ? same_hotkey(value, hotkey) :
          same_hotkey(value, hold_hotkey)))
@@ -1173,6 +1241,7 @@ static void finish_capture(keymap_hotkey value)
 static void finish_source_capture(DWORD source)
 {
     int valid = keymap_source_supported(source) && active_modifiers() == 0 &&
+                (hold_hotkey.key == 0 || hold_hotkey.key != source) &&
                 !(hotkey.modifiers == 0 && hotkey.key == source) &&
                 !(hold_hotkey.modifiers == 0 && hold_hotkey.key == source);
     size_t index = source_capture_index;
@@ -1205,6 +1274,149 @@ static int modifier_index(const KBDLLHOOKSTRUCT *event)
     }
 }
 
+static unsigned int modifier_bit(int modifier)
+{
+    static const unsigned int bits[TRACKED_MODIFIER_COUNT] = {
+        KEYMAP_MOD_LCTRL, KEYMAP_MOD_RCTRL, KEYMAP_MOD_LALT,
+        KEYMAP_MOD_RALT, KEYMAP_MOD_LSHIFT, KEYMAP_MOD_RSHIFT,
+        KEYMAP_MOD_LWIN, KEYMAP_MOD_RWIN, KEYMAP_MOD_CAPS
+    };
+    return modifier >= 0 && modifier < TRACKED_MODIFIER_COUNT ?
+           bits[modifier] : 0;
+}
+
+static int pending_modifier_matches_shortcut(const int pending[2],
+                                             keymap_hotkey shortcut,
+                                             unsigned int generic_bit,
+                                             unsigned int left_bit,
+                                             unsigned int right_bit)
+{
+    if (shortcut.modifiers & generic_bit)
+        return pending[0] || pending[1];
+    return (pending[0] && (shortcut.modifiers & left_bit)) ||
+           (pending[1] && (shortcut.modifiers & right_bit));
+}
+
+static int pending_modifier_event_is_shortcut(
+    const KBDLLHOOKSTRUCT *event, int modifier, int released,
+    const int pending[2], unsigned int generic_bit,
+    unsigned int left_bit, unsigned int right_bit)
+{
+    keymap_hotkey shortcuts[2] = {hotkey, hold_hotkey};
+    unsigned int active = active_modifiers();
+    size_t index;
+    if (released || !hotkeys_enabled || block_hotkey_until_clear)
+        return 0;
+    if (modifier >= 0)
+        active |= modifier_bit(modifier);
+    if (pending[0])
+        active |= left_bit;
+    if (pending[1])
+        active |= right_bit;
+    for (index = 0; index < 2; ++index) {
+        keymap_hotkey shortcut = shortcuts[index];
+        if (!pending_modifier_matches_shortcut(pending, shortcut,
+                                               generic_bit, left_bit,
+                                               right_bit))
+            continue;
+        if (modifier >= 0) {
+            if (shortcut.key == 0 &&
+                (modifiers_equal(active, shortcut.modifiers) ||
+                 modifiers_can_extend(active, shortcut.modifiers) ||
+                 (hold_provisional &&
+                  modifiers_contain(active, shortcut.modifiers))))
+                return 1;
+            if (shortcut.key != 0 && modifiers_can_extend(active, shortcut.modifiers))
+                return 1;
+        } else if (shortcut.key == event->vkCode &&
+                   modifiers_equal(active, shortcut.modifiers)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int pending_shift_event_is_shortcut(const KBDLLHOOKSTRUCT *event,
+                                           int modifier, int released)
+{
+    return pending_modifier_event_is_shortcut(
+        event, modifier, released, hold_shift_pending, KEYMAP_MOD_SHIFT,
+        KEYMAP_MOD_LSHIFT, KEYMAP_MOD_RSHIFT);
+}
+
+static int pending_win_event_is_shortcut(const KBDLLHOOKSTRUCT *event,
+                                         int modifier, int released)
+{
+    return pending_modifier_event_is_shortcut(
+        event, modifier, released, hotkey_win_pending, KEYMAP_MOD_WIN,
+        KEYMAP_MOD_LWIN, KEYMAP_MOD_RWIN);
+}
+
+static int shortcut_uses_pending_modifier_as_other(
+    keymap_hotkey shortcut, const int other_seen[2],
+    unsigned int generic_bit, unsigned int left_bit, unsigned int right_bit)
+{
+    return (other_seen[0] &&
+            (shortcut.modifiers & (generic_bit | left_bit))) ||
+           (other_seen[1] &&
+            (shortcut.modifiers & (generic_bit | right_bit)));
+}
+
+static int shortcut_uses_shift_seen_as_other(keymap_hotkey shortcut)
+{
+    if (!(shortcut.modifiers & KEYMAP_MOD_CAPS))
+        return 0;
+    return shortcut_uses_pending_modifier_as_other(
+        shortcut, hold_shift_other_seen, KEYMAP_MOD_SHIFT,
+        KEYMAP_MOD_LSHIFT, KEYMAP_MOD_RSHIFT);
+}
+
+static int shortcut_uses_win_seen_as_other(keymap_hotkey shortcut)
+{
+    return shortcut_uses_pending_modifier_as_other(
+        shortcut, hotkey_win_other_seen, KEYMAP_MOD_WIN,
+        KEYMAP_MOD_LWIN, KEYMAP_MOD_RWIN);
+}
+
+static int consume_pending_modifier_for_shortcut(
+    int pending[2], unsigned char captured[TRACKED_MODIFIER_COUNT],
+    keymap_hotkey shortcut, int modifier_index_base,
+    unsigned int generic_bit, unsigned int left_bit, unsigned int right_bit);
+
+static void consume_pending_shift_for_shortcut(keymap_hotkey shortcut)
+{
+    consume_pending_modifier_for_shortcut(
+        hold_shift_pending, captured_modifiers, shortcut, 4,
+        KEYMAP_MOD_SHIFT, KEYMAP_MOD_LSHIFT, KEYMAP_MOD_RSHIFT);
+}
+
+static int consume_pending_modifier_for_shortcut(
+    int pending[2], unsigned char captured[TRACKED_MODIFIER_COUNT],
+    keymap_hotkey shortcut, int modifier_index_base,
+    unsigned int generic_bit, unsigned int left_bit, unsigned int right_bit)
+{
+    int side;
+    int consumed = 0;
+    for (side = 0; side < 2; ++side) {
+        unsigned int required = side == 0 ? left_bit : right_bit;
+        if (!pending[side] ||
+            (!(shortcut.modifiers & generic_bit) &&
+             !(shortcut.modifiers & required)))
+            continue;
+        pending[side] = 0;
+        captured[modifier_index_base + side] = 1;
+        consumed = 1;
+    }
+    return consumed;
+}
+
+static int consume_pending_win_for_shortcut(keymap_hotkey shortcut)
+{
+    return consume_pending_modifier_for_shortcut(
+        hotkey_win_pending, captured_modifiers, shortcut, 6,
+        KEYMAP_MOD_WIN, KEYMAP_MOD_LWIN, KEYMAP_MOD_RWIN);
+}
+
 static int shortcut_passthrough_modifier_active(void)
 {
     return (active_modifiers() &
@@ -1221,6 +1433,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     int caps_key_was_passed;
     int caps_shortcut_triggered = 0;
     int shift_shortcut_triggered = 0;
+    int win_shortcut_triggered = 0;
 
     unsigned int mask;
     size_t index;
@@ -1237,10 +1450,15 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     released = message == WM_KEYUP || message == WM_SYSKEYUP;
     modifier = modifier_index(event);
     if ((hold_shift_pending[0] || hold_shift_pending[1]) &&
-        modifier != 4 && modifier != 5 &&
-        !(modifier == CAPS_MODIFIER_INDEX && !released &&
-          pending_shift_can_complete_caps_combo()))
-        replay_pending_shift_downs();
+        !((modifier == 4 || modifier == 5) &&
+          hold_shift_pending[modifier - 4]) &&
+        !pending_shift_event_is_shortcut(event, modifier, released))
+        replay_pending_shift_downs(1);
+    if ((hotkey_win_pending[0] || hotkey_win_pending[1]) &&
+        !((modifier == 6 || modifier == 7) &&
+          hotkey_win_pending[modifier - 6]) &&
+        !pending_win_event_is_shortcut(event, modifier, released))
+        replay_pending_win_downs(1);
     if (modifier >= 0 && keymap_is_enabled() && capture == CAPTURE_NONE) {
         for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
             mapped_key *key = &keys[index];
@@ -1319,6 +1537,10 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         hold_swallowed = released ? hold_swallow_key(event->vkCode, 1) : 0;
         modifiers[modifier] = !released;
         mask = active_modifiers();
+        if (hold_shift_pending[0])
+            mask |= KEYMAP_MOD_LSHIFT;
+        if (hold_shift_pending[1])
+            mask |= KEYMAP_MOD_RSHIFT;
         if (caps_key_was_passed && capture != CAPTURE_NONE) {
             clear_hotkey_block_if_released();
             return pass_caps_key_up(code, message, parameter);
@@ -1360,8 +1582,15 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             !modifiers_contain(mask, hotkey.modifiers))
             chord_down = 0;
         if (captured_modifiers[modifier]) {
-            if (released)
+            if (released) {
                 captured_modifiers[modifier] = 0;
+                if (modifier == 6 || modifier == 7) {
+                    int side = modifier - 6;
+                    hotkey_win_pending[side] = 0;
+                    hotkey_win_passed[side] = 0;
+                    hotkey_win_other_seen[side] = 0;
+                }
+            }
             clear_hotkey_block_if_released();
             return 1;
         }
@@ -1373,6 +1602,15 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 hold_shift_pending[side] = 1;
                 hold_shift_passed[side] = 0;
                 return 1;
+            }
+        }
+        if ((modifier == 6 || modifier == 7) && !released) {
+            int side = modifier - 6;
+            if (!hotkey_win_pending[side] &&
+                modifier_down_may_start_hotkey(modifier, KEYMAP_MOD_WIN_ANY)) {
+                hotkey_win_pending[side] = 1;
+                hotkey_win_passed[side] = 0;
+                hotkey_win_other_seen[side] = 0;
             }
         }
         clear_hotkey_block_if_released();
@@ -1392,7 +1630,9 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                 int should_hold = hotkeys_enabled && hold_hotkey.modifiers != 0 &&
                                   modifiers_equal(mask, hold_hotkey.modifiers) &&
                                   !block_hotkey_until_clear &&
-                                  !hold_suppressed_until_release;
+                                  !hold_suppressed_until_release &&
+                                  !shortcut_uses_shift_seen_as_other(hold_hotkey) &&
+                                  !shortcut_uses_win_seen_as_other(hold_hotkey);
                 if (should_hold && hold_hotkey_is_toggle_prefix(mask))
                     begin_hold_provisional();
                 else {
@@ -1401,18 +1641,29 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
                         mark_caps_restore_needed(hold_hotkey);
                 }
             } else if (hold_key_down) {
-                set_hold_active(hotkeys_enabled && modifiers_equal(mask, hold_hotkey.modifiers));
+                set_hold_active(hotkeys_enabled &&
+                                !shortcut_uses_win_seen_as_other(hold_hotkey) &&
+                                modifiers_equal(mask, hold_hotkey.modifiers));
             }
         }
 
         if (hotkey.key == 0 && hotkey.modifiers != 0) {
             if (modifiers_contain(mask, hotkey.modifiers) && hotkeys_enabled &&
+                !shortcut_uses_shift_seen_as_other(hotkey) &&
+                !shortcut_uses_win_seen_as_other(hotkey) &&
                 (!hold_active || hold_provisional) && !released &&
                 (modifiers_equal(mask, hotkey.modifiers) ||
                  (hold_provisional &&
                   modifiers_contain(mask, hotkey.modifiers))) && !chord_down &&
                 !block_hotkey_until_clear) {
                 chord_down = 1;
+                if (hotkey.modifiers & KEYMAP_MOD_SHIFT_ANY)
+                    consume_pending_shift_for_shortcut(hotkey);
+                if ((hotkey.modifiers & KEYMAP_MOD_WIN_ANY) &&
+                    consume_pending_win_for_shortcut(hotkey) &&
+                    (modifier == 6 || modifier == 7) &&
+                    captured_modifiers[modifier])
+                    win_shortcut_triggered = 1;
                 if (hold_provisional) {
                     clear_hold_provisional();
                     hold_suppressed_until_release = 1;
@@ -1444,6 +1695,19 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
         if ((modifier == 4 || modifier == 5) && released &&
             hold_shift_passed[modifier - 4]) {
             hold_shift_passed[modifier - 4] = 0;
+            hold_shift_other_seen[modifier - 4] = 0;
+            track_passed_key(event->vkCode, 1);
+            return CallNextHookEx(hook, code, message, parameter);
+        }
+        if ((modifier == 6 || modifier == 7) && released &&
+            hotkey_win_pending[modifier - 6]) {
+            replay_pending_win_tap(modifier - 6);
+            return 1;
+        }
+        if ((modifier == 6 || modifier == 7) && released &&
+            hotkey_win_passed[modifier - 6]) {
+            hotkey_win_passed[modifier - 6] = 0;
+            hotkey_win_other_seen[modifier - 6] = 0;
             track_passed_key(event->vkCode, 1);
             return CallNextHookEx(hook, code, message, parameter);
         }
@@ -1458,6 +1722,8 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             captured_modifiers[modifier] = 1;
             return 1;
         }
+        if (win_shortcut_triggered)
+            return 1;
         if (hold_swallowed || was_hold_suspended || hold_modifiers_suspended ||
             hold_has_swallowed_modifier()) {
             if (!released)
@@ -1468,6 +1734,9 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             hotkeys_enabled && any_hotkey_uses_caps()) {
             caps_restore = CAPS_RESTORE_ARMED;
         }
+        if ((modifier == 6 || modifier == 7) && !released &&
+            hotkey_win_pending[modifier - 6])
+            return 1;
         if ((modifier == 4 || modifier == 5) && !released)
             hold_shift_passed[modifier - 4] = 1;
         return CallNextHookEx(hook, code, message, parameter);
@@ -1610,6 +1879,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
         }
         if (hotkeys_enabled && !released && !block_hotkey_until_clear &&
+            !shortcut_uses_shift_seen_as_other(hold_hotkey) &&
             modifiers_equal(active_modifiers(), hold_hotkey.modifiers)) {
             hold_key_down = 1;
             set_hold_active(1);
@@ -1624,8 +1894,12 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
             return 1;
         }
         if (hotkeys_enabled && !hold_active && !released &&
+            !shortcut_uses_shift_seen_as_other(hotkey) &&
+            !shortcut_uses_win_seen_as_other(hotkey) &&
             !block_hotkey_until_clear && modifiers_equal(active_modifiers(), hotkey.modifiers)) {
             hotkey_key_down = 1;
+            consume_pending_shift_for_shortcut(hotkey);
+            consume_pending_win_for_shortcut(hotkey);
             mark_caps_restore_needed(hotkey);
             keymap_set_enabled(!enabled);
             PostMessageW(notify_window, changed_message, 0, 0);
@@ -1720,12 +1994,31 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM message, LPARAM parameter
     return CallNextHookEx(hook, code, message, parameter);
 }
 
+static LRESULT CALLBACK mouse_proc(int code, WPARAM message, LPARAM parameter)
+{
+    if (code == HC_ACTION &&
+        (hold_shift_pending[0] || hold_shift_pending[1]))
+        replay_pending_shift_downs(1);
+    if (code == HC_ACTION &&
+        (hotkey_win_pending[0] || hotkey_win_pending[1]))
+        replay_pending_win_downs(1);
+    return CallNextHookEx(mouse_hook, code, message, parameter);
+}
+
 int keymap_install(HINSTANCE instance, HWND window, UINT message)
 {
     notify_window = window;
     changed_message = message;
     hook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, instance, 0);
-    return hook != NULL;
+    if (hook == NULL)
+        return 0;
+    mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, instance, 0);
+    if (mouse_hook == NULL) {
+        UnhookWindowsHookEx(hook);
+        hook = NULL;
+        return 0;
+    }
+    return 1;
 }
 
 void keymap_handle_timer(UINT_PTR timer_id)
@@ -1743,10 +2036,15 @@ void keymap_handle_timer(UINT_PTR timer_id)
 
 void keymap_uninstall(void)
 {
-    replay_pending_shift_downs();
+    replay_pending_shift_downs(0);
+    replay_pending_win_downs(0);
     caps_restore = CAPS_RESTORE_IDLE;
     ZeroMemory(hold_shift_passed, sizeof(hold_shift_passed));
     ZeroMemory(hold_shift_pending, sizeof(hold_shift_pending));
+    ZeroMemory(hold_shift_other_seen, sizeof(hold_shift_other_seen));
+    ZeroMemory(hotkey_win_pending, sizeof(hotkey_win_pending));
+    ZeroMemory(hotkey_win_passed, sizeof(hotkey_win_passed));
+    ZeroMemory(hotkey_win_other_seen, sizeof(hotkey_win_other_seen));
     clear_hold_provisional();
     hold_suppressed_until_release = 0;
     capture = CAPTURE_NONE;
@@ -1770,5 +2068,9 @@ void keymap_uninstall(void)
     if (hook != NULL) {
         UnhookWindowsHookEx(hook);
         hook = NULL;
+    }
+    if (mouse_hook != NULL) {
+        UnhookWindowsHookEx(mouse_hook);
+        mouse_hook = NULL;
     }
 }

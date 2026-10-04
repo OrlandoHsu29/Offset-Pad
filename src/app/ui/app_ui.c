@@ -519,7 +519,7 @@ void ui_hotkey_capture_result(WPARAM result)
     switch (result) {
     case KEYMAP_CAPTURE_INVALID_ALT:
         lstrcpynW(hotkey_capture_status,
-                  L"不支持 Alt+单键/Alt+Shift/Alt+Caps：易失焦",
+                  L"alt + 不含 ctrl 或 win 的组合会导致文本框失去聚焦",
                   (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
         break;
     case KEYMAP_CAPTURE_INVALID_COUNT:
@@ -527,9 +527,14 @@ void ui_hotkey_capture_result(WPARAM result)
                   L"快捷键需由 2–4 个键组成，且至少包含一个修饰键",
                   (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
         break;
+    case KEYMAP_CAPTURE_INVALID_MODIFIER:
+        lstrcpynW(hotkey_capture_status,
+                  L"快捷键需包含Ctrl、Alt、Win或Caps中的至少一个",
+                  (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
+        break;
     case KEYMAP_CAPTURE_INVALID:
         lstrcpynW(hotkey_capture_status,
-                  L"快捷键已占用或与另一个快捷键冲突，请换一个组合",
+                  L"快捷键已占用或含有小键盘映射键，请换一个组合",
                   (int)(sizeof(hotkey_capture_status) / sizeof(hotkey_capture_status[0])));
         break;
     default:

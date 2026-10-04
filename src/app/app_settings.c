@@ -10,7 +10,8 @@
 #define LEGACY_DEFAULT_HOTKEY ((DWORD)(((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16)))
 #define PREVIOUS_DEFAULT_HOTKEY ((DWORD)(((KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16)))
 #define PREVIOUS_CTRL_DEFAULT_HOTKEY ((DWORD)(((KEYMAP_MOD_CAPS | KEYMAP_MOD_CTRL) << 16)))
-#define DEFAULT_HOLD_HOTKEY ((DWORD)((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16))
+#define DEFAULT_HOLD_HOTKEY ((DWORD)((KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) << 16))
+#define LEGACY_DEFAULT_HOLD_HOTKEY ((DWORD)((KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) << 16))
 #define PREVIOUS_DEFAULT_HOLD_HOTKEY ((DWORD)(KEYMAP_MOD_CAPS << 16))
 
 static int unsafe_alt_caps_hotkey(DWORD stored)
@@ -195,7 +196,8 @@ keymap_hotkey settings_default_hold_hotkey(void)
 keymap_hotkey settings_load_hold_hotkey(void)
 {
     DWORD stored = load_dword(L"HoldHotkey", DEFAULT_HOLD_HOTKEY);
-    if (stored == PREVIOUS_DEFAULT_HOLD_HOTKEY) {
+    if (stored == LEGACY_DEFAULT_HOLD_HOTKEY ||
+        stored == PREVIOUS_DEFAULT_HOLD_HOTKEY) {
         stored = DEFAULT_HOLD_HOTKEY;
         save_dword(L"HoldHotkey", stored);
     }

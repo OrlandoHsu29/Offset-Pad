@@ -39,6 +39,7 @@ _Static_assert(KEYMAP_MOD_ALL <= 0xFFFFU, "modifier flags must fit persisted DWO
 #define KEYMAP_CAPTURE_INVALID 2
 #define KEYMAP_CAPTURE_INVALID_COUNT 3
 #define KEYMAP_CAPTURE_INVALID_ALT 4
+#define KEYMAP_CAPTURE_INVALID_MODIFIER 5
 
 typedef struct keymap_hotkey {
     unsigned int modifiers;

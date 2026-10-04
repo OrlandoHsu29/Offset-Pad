@@ -135,6 +135,12 @@ static LRESULT key_event(DWORD key, WPARAM message)
     return keyboard_proc(HC_ACTION, message, (LPARAM)&event);
 }
 
+static LRESULT test_mouse_hook_event(WPARAM message)
+{
+    MSLLHOOKSTRUCT event = {0};
+    return mouse_proc(HC_ACTION, message, (LPARAM)&event);
+}
+
 static LRESULT caps_event(int down)
 {
     LRESULT result = key_event(VK_CAPITAL, down ? WM_KEYDOWN : WM_KEYUP);
@@ -216,6 +222,12 @@ int main(void)
     notify_window = (HWND)1;
 
     assert(!hotkey_valid((keymap_hotkey){0, 'A'}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_SHIFT, 'A'}));
+    assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE}));
+    assert(validate_hotkey((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE}) ==
+           KEYMAP_CAPTURE_INVALID_MODIFIER);
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 'A'}));
+    assert(hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL, 0}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT, 'K'}));
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT, 0}));
@@ -255,14 +267,18 @@ int main(void)
                          (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT |
                                              KEYMAP_MOD_LCTRL, 'K'});
     assert(wcscmp(name, L"LCtrl + LShift + Caps + K") == 0);
+    keymap_format_hotkey(name, sizeof(name) / sizeof(name[0]),
+                         (keymap_hotkey){KEYMAP_MOD_LALT | KEYMAP_MOD_LWIN, 0});
+    assert(wcscmp(name, L"LWin + LAlt") == 0);
     assert(!hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT | KEYMAP_MOD_SHIFT | KEYMAP_MOD_WIN, 'K'}));
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LCTRL) &&
            keymap_get_hotkey().key == 0);
-    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT) &&
+    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT) &&
            keymap_get_hold_hotkey().key == 0);
+    assert(!hold_hotkey_valid((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 'K'}));
     assert(!hold_hotkey_valid((keymap_hotkey){KEYMAP_MOD_CAPS, 0}));
     keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CAPS, 0});
-    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
+    assert(keymap_get_hold_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
 
     /* Ctrl+Caps toggles on each Caps press while Ctrl remains held. */
     keymap_set_enabled(0);
@@ -296,6 +312,70 @@ int main(void)
     modifier(VK_LSHIFT, 0);
     assert(!mock_caps_lock_on && !keymap_is_enabled());
 
+    /* Mouse input is an Other event: replay Shift and don't start Caps+Shift later. */
+    {
+        keymap_hotkey saved_toggle = keymap_get_hotkey();
+        keymap_hotkey saved_hold = keymap_get_hold_hotkey();
+        keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_CAPS, 0},
+                           (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
+        keymap_set_enabled(0);
+        sent_count = 0;
+        mock_caps_lock_on = 0;
+        modifier(VK_LSHIFT, 1);
+        assert(hold_shift_pending[0] && sent_count == 0);
+        assert(test_mouse_hook_event(WM_MOUSEMOVE) == 0);
+        assert(!hold_shift_pending[0] && hold_shift_passed[0] &&
+               hold_shift_other_seen[0]);
+        assert(sent_count == 1 && sent_inputs[0].ki.wVk == VK_LSHIFT &&
+               sent_inputs[0].ki.dwFlags == 0);
+        assert(caps_event(1) == 0 && !hold_active);
+        assert(caps_event(0) == 0);
+        modifier(VK_LSHIFT, 0);
+        assert(!hold_shift_passed[0] && !hold_shift_other_seen[0]);
+        keymap_set_hotkeys(saved_toggle, saved_hold);
+        keymap_set_enabled(0);
+    }
+
+    /* Win key behavior is deferred like Shift while a Win hotkey is possible. */
+    {
+        keymap_hotkey saved_toggle = keymap_get_hotkey();
+        keymap_hotkey saved_hold = keymap_get_hold_hotkey();
+        keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_WIN, 'Q'},
+                           (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
+        keymap_set_enabled(0);
+        sent_count = 0;
+        modifier(VK_LWIN, 1);
+        assert(hotkey_win_pending[0] && sent_count == 0);
+        modifier(VK_LWIN, 0);
+        assert(!hotkey_win_pending[0] && sent_count == 2);
+        assert(sent_inputs[0].ki.wVk == VK_LWIN &&
+               sent_inputs[0].ki.dwFlags == KEYEVENTF_EXTENDEDKEY);
+        assert(sent_inputs[1].ki.wVk == VK_LWIN &&
+               sent_inputs[1].ki.dwFlags == (KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+
+        sent_count = 0;
+        modifier(VK_LWIN, 1);
+        assert(key_event('Q', WM_KEYDOWN) == 1 && keymap_is_enabled());
+        assert(!hotkey_win_pending[0] && captured_modifiers[6]);
+        assert(key_event('Q', WM_KEYUP) == 1);
+        modifier(VK_LWIN, 0);
+        assert(!captured_modifiers[6]);
+
+        keymap_set_enabled(0);
+        sent_count = 0;
+        modifier(VK_LWIN, 1);
+        assert(key_event('A', WM_KEYDOWN) == 0);
+        assert(!hotkey_win_pending[0] && hotkey_win_passed[0] &&
+               hotkey_win_other_seen[0]);
+        assert(sent_count == 1 && sent_inputs[0].ki.wVk == VK_LWIN &&
+               sent_inputs[0].ki.dwFlags == KEYEVENTF_EXTENDEDKEY);
+        assert(key_event('Q', WM_KEYDOWN) == 0 && !keymap_is_enabled());
+        assert(key_event('Q', WM_KEYUP) == 0);
+        modifier(VK_LWIN, 0);
+        assert(!hotkey_win_passed[0] && !hotkey_win_other_seen[0]);
+        keymap_set_hotkeys(saved_toggle, saved_hold);
+    }
+
     /* Hold input defers and then consumes Shift as part of the chord. */
     mock_caps_lock_on = 0;
     active_timer_id = 0;
@@ -325,26 +405,30 @@ int main(void)
     modifier(VK_LSHIFT, 0);
     assert(!mock_caps_lock_on && !keymap_is_enabled());
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
-                       (keymap_hotkey){KEYMAP_MOD_CTRL, 'K'});
+                       (keymap_hotkey){KEYMAP_MOD_CTRL, 'Q'});
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT));
     assert(keymap_get_hold_hotkey().modifiers == KEYMAP_MOD_CTRL &&
-           keymap_get_hold_hotkey().key == 'K');
-    keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE},
+           keymap_get_hold_hotkey().key == 'Q');
+    keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, VK_SPACE},
                        (keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0});
 
-    /* A user-selected Shift+Space toggle remains supported. */
+    /* Shift+Space requires another explicit modifier in addition to Shift. */
     keymap_set_enabled(0);
+    modifier(VK_LCONTROL, 1);
     modifier(VK_LSHIFT, 1);
     assert(key_event(VK_SPACE, WM_KEYDOWN) == 1);
     assert(keymap_is_enabled());
     assert(key_event(VK_SPACE, WM_KEYUP) == 1);
     modifier(VK_LSHIFT, 0);
+    modifier(VK_LCONTROL, 0);
     keymap_set_enabled(0);
+    modifier(VK_LCONTROL, 1);
     modifier(VK_RSHIFT, 1);
     assert(key_event(VK_SPACE, WM_KEYDOWN) == 1);
     assert(keymap_is_enabled());
     assert(key_event(VK_SPACE, WM_KEYUP) == 1);
     modifier(VK_RSHIFT, 0);
+    modifier(VK_LCONTROL, 0);
     keymap_set_enabled(0);
 
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
@@ -526,16 +610,18 @@ int main(void)
     assert(keymap_get_hotkey().modifiers == (KEYMAP_MOD_CAPS | KEYMAP_MOD_LSHIFT));
     /* Non-Caps shortcuts bypass Caps tracking and preserve ordinary Caps behavior. */
     keymap_set_enabled(0);
-    keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_SHIFT, VK_SPACE});
-    keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, 0});
+    keymap_set_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_SHIFT, VK_SPACE});
+    keymap_set_hold_hotkey((keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
     mock_caps_lock_on = 0;
     assert(caps_event(1) == 0 && mock_caps_lock_on);
     assert(caps_event(0) == 0);
+    modifier(VK_LCONTROL, 1);
     modifier(VK_LSHIFT, 1);
     assert(key_event(VK_SPACE, WM_KEYDOWN) == 1);
     assert(keymap_is_enabled() && keymap_is_visual_enabled());
     key_event(VK_SPACE, WM_KEYUP);
     modifier(VK_LSHIFT, 0);
+    modifier(VK_LCONTROL, 0);
     keymap_set_enabled(0);
     keymap_set_hotkeys((keymap_hotkey){KEYMAP_MOD_CAPS | KEYMAP_MOD_SHIFT, 0},
                        (keymap_hotkey){KEYMAP_MOD_CTRL | KEYMAP_MOD_ALT, 0});
